@@ -13,6 +13,9 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Development logs
+dev-log/
+
 # Video files (if you don't want to commit them)
 *.mp4
 *.avi
