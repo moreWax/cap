@@ -1,0 +1,12 @@
+[package]
+name = "cap-rtsp-demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0"
+cap-rtsp = { path = "../cap-rtsp" }
+cap_scale = { path = "../cap_scale" }
+clap = { version = "4.0", features = ["derive"] }
+crossbeam-channel = "0.5"
+tokio = { version = "1.0", features = ["full"] }

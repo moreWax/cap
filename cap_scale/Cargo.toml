@@ -1,0 +1,18 @@
+[package]
+name = "cap_scale"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Token-efficient screen scaling & DeepSeek-style Gundam tiling for VLM input (CPU path)"
+repository = ""
+
+[dependencies]
+fast_image_resize = { version = "5", features = ["rayon"] }
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1"
+
+[features]
+default = []
+
+[lib]
+name = "cap_scale"

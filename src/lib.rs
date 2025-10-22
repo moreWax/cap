@@ -83,12 +83,12 @@
 //! - **33% memory reduction** through buffer pooling
 //! - **Sub-millisecond latency** with predictable synchronous execution
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
-pub mod config;
 pub mod buffer_pool;
-pub mod ring_buffer;
+pub mod config;
 pub mod performance_analysis;
+pub mod ring_buffer;
 
 /// Configuration options for screen capture operations.
 ///
@@ -144,6 +144,18 @@ pub struct CaptureOptions {
     ///
     /// Note: Window capture is not supported on Linux (will fall back to full screen).
     pub window: bool,
+
+    /// Optional scaling preset for token-efficient VLM input.
+    ///
+    /// When set, captured frames will be scaled down to reduce token usage
+    /// while maintaining visual quality. Uses aspect-preserving scaling.
+    pub scale_preset: Option<cap_scale::presets::TokenPreset>,
+
+    /// Whether to enable DeepSeek-OCR Gundam tiling mode.
+    ///
+    /// When enabled, produces n×640×640 tiles + 1×1024×1024 global view
+    /// exactly matching DeepSeek-OCR's input requirements.
+    pub gundam_mode: bool,
 }
 
 /// Main entry point for screen capture operations.
@@ -228,11 +240,16 @@ pub async fn capture_screen(options: CaptureOptions) -> Result<()> {
     // WASM builds cannot capture screens - this is a configurator only
     #[cfg(target_arch = "wasm32")]
     {
-        return Err(anyhow!("Screen capture is not available in web browsers. Use the generated CLI command instead."));
+        return Err(anyhow!(
+            "Screen capture is not available in web browsers. Use the generated CLI command instead."
+        ));
     }
 
     println!("Output: {}", options.output);
-    println!("FPS: {}, Duration: {}s, CRF: {}", options.fps, options.seconds, options.crf);
+    println!(
+        "FPS: {}, Duration: {}s, CRF: {}",
+        options.fps, options.seconds, options.crf
+    );
 
     dispatch_to_platform(options).await
 }
@@ -262,9 +279,7 @@ async fn dispatch_linux(options: CaptureOptions) -> Result<()> {
 async fn dispatch_wayland(options: CaptureOptions) -> Result<()> {
     #[cfg(feature = "wayland-pipe")]
     {
-        println!(
-            "Detected Wayland session → using Portal + PipeWire (ashpd) + GStreamer …"
-        );
+        println!("Detected Wayland session → using Portal + PipeWire (ashpd) + GStreamer …");
         return wayland::capture_gstreamer(&options).await;
     }
     #[cfg(not(feature = "wayland-pipe"))]
@@ -277,7 +292,9 @@ Note: This requires GStreamer + dev headers (see README). Falling back to scrap 
         #[cfg(feature = "screen-capture")]
         return scrap::capture_ffmpeg(options).await;
         #[cfg(not(feature = "screen-capture"))]
-        return Err(anyhow!("Screen capture not available - enable with: cargo run --features screen-capture"));
+        return Err(anyhow!(
+            "Screen capture not available - enable with: cargo run --features screen-capture"
+        ));
     }
 }
 
@@ -287,7 +304,9 @@ async fn dispatch_x11(options: CaptureOptions) -> Result<()> {
     #[cfg(feature = "screen-capture")]
     return scrap::capture_ffmpeg(options).await;
     #[cfg(not(feature = "screen-capture"))]
-    return Err(anyhow!("Screen capture not available - enable with: cargo run --features screen-capture"));
+    return Err(anyhow!(
+        "Screen capture not available - enable with: cargo run --features screen-capture"
+    ));
 }
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -296,7 +315,9 @@ async fn dispatch_desktop(options: CaptureOptions) -> Result<()> {
     #[cfg(feature = "screen-capture")]
     return scrap::capture_ffmpeg(options).await;
     #[cfg(not(feature = "screen-capture"))]
-    return Err(anyhow!("Screen capture not available - enable with: cargo run --features screen-capture"));
+    return Err(anyhow!(
+        "Screen capture not available - enable with: cargo run --features screen-capture"
+    ));
 }
 
 /// Returns true if XDG_SESSION_TYPE indicates 'wayland'

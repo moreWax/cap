@@ -376,119 +376,14 @@ fn capture_scrap_ffmpeg(options: CaptureOptions) -> Result<()> {
         (w, h, cap)
     };
 
-    let mut child = Command::new("ffmpeg")
-        .args([
-            "-y",
-            // Raw frames in from stdin
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "bgra",  // Changed from bgr24 to bgra for zero-copy
-            "-s",
-            &format!("{}x{}", w, h),
-            "-r",
-            &options.fps.to_string(),
-            "-i",
-            "-", // stdin
-            "-an",
-            "-c:v",
-            "libx264",
-            "-preset",
-            "veryfast",
-            "-tune",
-            "zerolatency",
-            "-crf",
-            &options.crf.to_string(),
-            "-pix_fmt",
-            "yuv420p",
-            "-movflags",
-            "+faststart",
-            &options.output,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .context("failed to spawn ffmpeg (ensure it's installed and on PATH)")?;
-
-    let mut ffmpeg_stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| anyhow!("ffmpeg stdin not available"))?;
-
-    // Simple frame pacing
-    let frame_time = Duration::from_secs_f64(1.0 / options.fps as f64);
-    let end_time = Instant::now() + Duration::from_secs(options.seconds as u64);
-
-    // Buffer pool for zero-allocation frame processing (prepared for future use)
-    // let frame_size = w * h * 4; // BGRA = 4 bytes per pixel
-    // let buffer_pool = BufferPool::new(frame_size, 2); // Pool of 2 buffers for double buffering
-
-    while Instant::now() < end_time {
-        let t0 = Instant::now();
-        match cap.frame() {
-            Ok(frame) => {
-                // scrap frame is BGRA - use directly (zero copy!)
-                let frame_data = &frame[..];
-                // sanity check
-                if frame_data.len() != frame_size {
-                    return Err(anyhow!("unexpected frame size from scrap: got {}, expected {}", frame_data.len(), frame_size));
-                }
-                // Write BGRA data directly to FFmpeg (no conversion needed)
-                ffmpeg_stdin.write_all(frame_data)?;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                // no frame ready yet, small nap
-                thread::sleep(time::Duration::from_millis(2));
-            }
-            Err(e) => return Err(anyhow!("scrap frame error: {}", e)),
-        }
-
-        // Pace to target FPS
-        let elapsed = t0.elapsed();
-        if elapsed < frame_time {
-            thread::sleep(frame_time - elapsed);
-        }
-    }
-
-    drop(ffmpeg_stdin); // close to let ffmpeg finalize
-    let status = child.wait().context("waiting for ffmpeg to finish")?;
-    if !status.success() {
-        return Err(anyhow!("ffmpeg exited with code {:?}", status.code()));
-    }
-    println!("Saved {}", options.output);
-    Ok(())
-}
-
-#[cfg(any(target_os = "windows", target_os = "macos"))]
-fn capture_scrap_ffmpeg(options: CaptureOptions) -> Result<()> {
-    let (w, h, mut cap) = if options.window {
-        let windows = Window::all().context("failed to list windows")?;
-        if windows.is_empty() {
-            return Err(anyhow!("no windows found"));
-        }
-        println!("Available windows:");
-        for (i, w) in windows.iter().enumerate() {
-            println!("{}: {}", i, w.title());
-        }
-        println!("Enter the number of the window to capture:");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).context("failed to read input")?;
-        let index: usize = input.trim().parse().context("invalid number")?;
-        if index >= windows.len() {
-            return Err(anyhow!("invalid window index"));
-        }
-        let window = windows.into_iter().nth(index).ok_or_else(|| anyhow!("window index {} out of bounds", index))?;
-        let w = window.width();
-        let h = window.height();
-        let cap = Capturer::new(window).context("cannot create capturer for window")?;
-        (w, h, cap)
+    // Determine output dimensions (scaled or original)
+    let (output_w, output_h) = if let Some(preset) = &options.scale_preset {
+        use cap_scale::presets::{build_plan, AspectMode, Size};
+        let input_size = Size { w: w as u32, h: h as u32 };
+        let plan = build_plan(input_size, preset.to_target(), AspectMode::Preserve);
+        (plan.out.w, plan.out.h)
     } else {
-        let display = Display::primary().context("scrap: no primary display")?;
-        let w = display.width();
-        let h = display.height();
-        let cap = Capturer::new(display).context("scrap: cannot create capturer")?;
-        (w, h, cap)
+        (w as u32, h as u32)
     };
 
     let mut child = Command::new("ffmpeg")
@@ -500,7 +395,7 @@ fn capture_scrap_ffmpeg(options: CaptureOptions) -> Result<()> {
             "-pix_fmt",
             "bgra",  // Changed from bgr24 to bgra for zero-copy
             "-s",
-            &format!("{}x{}", w, h),
+            &format!("{}x{}", output_w, output_h),  // Use scaled dimensions
             "-r",
             &options.fps.to_string(),
             "-i",
@@ -534,23 +429,58 @@ fn capture_scrap_ffmpeg(options: CaptureOptions) -> Result<()> {
     // Simple frame pacing
     let frame_time = Duration::from_secs_f64(1.0 / options.fps as f64);
     let end_time = Instant::now() + Duration::from_secs(options.seconds as u64);
+    let frame_size = w as usize * h as usize * 4; // BGRA = 4 bytes per pixel
 
-    // Buffer pool for zero-allocation frame processing (prepared for future use)
-    // let frame_size = w * h * 4; // BGRA = 4 bytes per pixel
-    // let buffer_pool = BufferPool::new(frame_size, 2); // Pool of 2 buffers for double buffering
+    // Initialize scaling resources if needed
+    let (mut resizer, mut staging, mut scaled_buffer, output_size) = if let Some(preset) = &options.scale_preset {
+        use cap_scale::presets::{build_plan, AspectMode, Size};
+        let input_size = Size { w: w as u32, h: h as u32 };
+        let plan = build_plan(input_size, preset.to_target(), AspectMode::Preserve);
+        let scaled_size = plan.out.w as usize * plan.out.h as usize * 4;
+        let mut buffer = vec![0u8; scaled_size];
+        println!("Scaling enabled: {}x{} → {}x{} ({} preset)", w, h, plan.out.w, plan.out.h, preset.to_target().to_string());
+        (Some(fir::Resizer::new()), Some(cap_scale::cpu::Staging::with_capacity(w as usize * 4 * h as usize)), Some(buffer), Some(plan.out))
+    } else if options.gundam_mode {
+        return Err(anyhow!("Gundam mode not yet implemented for video capture"));
+    } else {
+        (None, None, None, None)
+    };
 
     while Instant::now() < end_time {
         let t0 = Instant::now();
         match cap.frame() {
             Ok(frame) => {
-                // scrap frame is BGRA - use directly (zero copy!)
                 let frame_data = &frame[..];
                 // sanity check
                 if frame_data.len() != frame_size {
                     return Err(anyhow!("unexpected frame size from scrap: got {}, expected {}", frame_data.len(), frame_size));
                 }
-                // Write BGRA data directly to FFmpeg (no conversion needed)
-                ffmpeg_stdin.write_all(frame_data)?;
+
+                // Apply scaling if enabled
+                let data_to_write = if let (Some(ref mut resizer), Some(ref mut staging), Some(ref mut buffer), Some(output_size)) = 
+                    (&mut resizer, &mut staging, &mut scaled_buffer, &output_size) {
+                    use cap_scale::cpu::scale_bgra_cpu;
+                    use cap_scale::presets::{build_plan, AspectMode, Size};
+                    
+                    let input_size = Size { w: w as u32, h: h as u32 };
+                    let plan = build_plan(input_size, options.scale_preset.as_ref().unwrap().to_target(), AspectMode::Preserve);
+                    
+                    scale_bgra_cpu(
+                        resizer,
+                        frame_data,
+                        Size { w: w as u32, h: h as u32 },
+                        Some(w as usize * 4),
+                        &plan,
+                        buffer,
+                        Some(staging),
+                    )?;
+                    &buffer[..]
+                } else {
+                    frame_data
+                };
+
+                // Write data to FFmpeg (scaled or original)
+                ffmpeg_stdin.write_all(data_to_write)?;
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 // no frame ready yet, small nap

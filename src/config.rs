@@ -138,6 +138,18 @@ pub struct CaptureConfig {
     /// When `false`, captures the primary display. Note that window capture
     /// is not supported on Linux platforms.
     pub window: bool,
+
+    /// Optional scaling preset for token-efficient VLM input.
+    ///
+    /// When set, captured frames will be scaled down to reduce token usage
+    /// while maintaining visual quality. Uses aspect-preserving scaling.
+    pub scale_preset: Option<cap_scale::presets::TokenPreset>,
+
+    /// Whether to enable DeepSeek-OCR Gundam tiling mode.
+    ///
+    /// When enabled, produces n×640×640 tiles + 1×1024×1024 global view
+    /// exactly matching DeepSeek-OCR's input requirements.
+    pub gundam_mode: bool,
 }
 
 impl Default for CaptureConfig {
@@ -149,6 +161,8 @@ impl Default for CaptureConfig {
     /// - `seconds`: 10 (reasonable test duration)
     /// - `crf`: 23 (good quality/size balance)
     /// - `window`: false (full screen capture)
+    /// - `scale_preset`: None (no scaling)
+    /// - `gundam_mode`: false (standard capture)
     ///
     /// # Examples
     ///
@@ -166,6 +180,8 @@ impl Default for CaptureConfig {
             seconds: 10,
             crf: 23,
             window: false,
+            scale_preset: None,
+            gundam_mode: false,
         }
     }
 }
@@ -184,6 +200,8 @@ impl CaptureConfig {
     /// - `seconds`: Capture duration in seconds (must be > 0)
     /// - `crf`: Quality factor (must be 18-28)
     /// - `window`: Window capture mode
+    /// - `scale_preset`: Optional token-efficient scaling preset
+    /// - `gundam_mode`: Enable DeepSeek-OCR Gundam tiling
     ///
     /// # Examples
     ///
@@ -196,15 +214,27 @@ impl CaptureConfig {
     ///     30,     // 30 seconds
     ///     18,     // High quality
     ///     false,  // Full screen
+    ///     None,   // No scaling
+    ///     false,  // No Gundam
     /// );
     /// ```
-    pub fn new(output: String, fps: u32, seconds: u32, crf: u8, window: bool) -> Self {
+    pub fn new(
+        output: String,
+        fps: u32,
+        seconds: u32,
+        crf: u8,
+        window: bool,
+        scale_preset: Option<cap_scale::presets::TokenPreset>,
+        gundam_mode: bool,
+    ) -> Self {
         Self {
             output,
             fps,
             seconds,
             crf,
             window,
+            scale_preset,
+            gundam_mode,
         }
     }
 
@@ -302,6 +332,8 @@ impl CaptureConfig {
             seconds: self.seconds,
             crf: self.crf,
             window: self.window,
+            scale_preset: self.scale_preset,
+            gundam_mode: self.gundam_mode,
         }
     }
 }
