@@ -101,6 +101,10 @@ Options:
   -q, --quality <QUALITY>   Quality preset: low, medium, high, ultra [default: medium]
   -f, --fps <FPS>           Frames per second (higher = smoother but larger files) [default: 30]
       --window              Capture a specific window instead of the entire screen
+      --rtsp                Stream via RTSP instead of saving to file
+      --rtsp-port <PORT>    RTSP server port when using --rtsp [default: 8554]
+      --scale-preset <PRESET> Scale frames for VLM input: p2_56, p4, p6_9, p9, p10_24
+      --gundam              Enable Gundam tiling mode for DeepSeek-OCR
   -h, --help                Print help
 ```
 
@@ -416,11 +420,62 @@ sudo apt-get install -y \
 - On Wayland, the portal UI controls which screen/window is captured.
 - Encoding is CPU-bound with software x264 by default; enable hardware encoders if available for lower CPU usage.
 
-## Development
+## RTSP Streaming (VLM Integration)
 
-- Build quickly to validate dependencies:
-  - `cargo check`
-- Run with your desired settings:
-  - `cargo run --release -- --output out.mp4 --fps 30 --seconds 10 --crf 23`
+cap now supports real-time RTSP streaming for Vision Language Model (VLM) connectors. Stream screen capture directly to AI models that accept RTSP feeds.
 
-If you want a `--codec` flag to switch automatically to NVENC/VAAPI/Videotoolbox, open an issue or adapt the encoder selection sections in `src/main.rs`.
+### RTSP Quick Start
+
+```bash
+# Enable RTSP feature and stream to port 8554
+cargo build --release --features rtsp-streaming
+./target/release/cap --rtsp --rtsp-port 8554
+
+# View the stream with VLC
+vlc rtsp://127.0.0.1:8554/cap
+```
+
+### RTSP Features
+
+- **Low-latency H.264 streaming** via GStreamer RTSP server
+- **Token-efficient scaling** with DeepSeek-OCR Gundam tiling support
+- **Shared pipeline** for multiple concurrent clients
+- **Configurable encoder** (x264enc by default, supports hardware encoders)
+- **Zero-copy BGRA processing** with SIMD acceleration
+
+### RTSP Options
+
+```
+--rtsp                    Enable RTSP streaming mode instead of file output
+--rtsp-port <PORT>        RTSP server port (default: 8554)
+--scale-preset <PRESET>   Scale frames for VLM input: p2_56, p4, p6_9, p9, p10_24
+--gundam                  Enable Gundam tiling mode for DeepSeek-OCR
+```
+
+### RTSP Demo
+
+Try the standalone RTSP demo that generates synthetic frames:
+
+```bash
+cargo run --bin cap-rtsp-demo -- --width 1280 --height 720 --fps 30
+# Then open: vlc rtsp://127.0.0.1:8554/cap
+```
+
+### RTSP for VLM Integration
+
+The RTSP streaming is optimized for AI vision models:
+
+- **Real-time processing**: Sub-frame latency with bounded queues
+- **VLM-optimized scaling**: Token-efficient frame preprocessing
+- **Gundam tiling**: DeepSeek-OCR compatible multi-tile output
+- **Hardware acceleration**: Support for NVENC, VAAPI, VideoToolbox encoders
+
+### Building with RTSP
+
+```bash
+# Build with RTSP support
+cargo build --release --features rtsp-streaming
+
+# Install GStreamer RTSP server libraries (Ubuntu/Debian)
+sudo apt install libgstrtspserver-1.0-dev gstreamer1.0-rtsp
+```
