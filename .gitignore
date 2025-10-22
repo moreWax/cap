@@ -1,0 +1,22 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Video files (if you don't want to commit them)
+*.mp4
+*.avi
+*.mov
+
+# Debug files
+*.pdb
