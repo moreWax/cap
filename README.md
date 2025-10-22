@@ -5,7 +5,7 @@
 - **Windows / macOS / X11**: raw frame capture via [`scrap`](https://crates.io/crates/scrap) → encoded by an embedded FFmpeg subprocess (`libx264`).
 - **Linux Wayland**: secure XDG Desktop Portal consent dialog, PipeWire stream via [`ashpd`](https://crates.io/crates/ashpd) → encoded by a built-in GStreamer pipeline (`x264enc` + `mp4mux`).
 
-This repository is a binary application (CLI), not a library crate. Use it from the command line to record the screen. The code is kept intentionally small and readable.
+This repository provides both a **library crate** (`hybrid_screen_capture`) and **binary applications**. You can use it as a command-line tool to record the screen, or integrate the library into your own Rust projects. The code is kept intentionally small and readable.
 
 ## Library Architecture & Performance
 
@@ -120,7 +120,7 @@ Options:
 - Windows / macOS / X11: raw frame capture via [`scrap`](https://crates.io/crates/scrap) → encoded by an embedded FFmpeg subprocess (`libx264`).
 - Linux Wayland: secure XDG Desktop Portal consent dialog, PipeWire stream via [`ashpd`](https://crates.io/crates/ashpd) → encoded by a built-in GStreamer pipeline (`x264enc` + `mp4mux`).
 
-This repository is a binary application (CLI), not a library crate. Use it from the command line to record the screen. The code is kept intentionally small and readable (single `src/main.rs`).
+This repository provides both a **library crate** (`hybrid_screen_capture`) and **binary applications**. You can use it as a command-line tool to record the screen, or integrate the library into your own Rust projects. The code is kept intentionally small and readable (single `src/main.rs`).
 
 ## What You Get
 
