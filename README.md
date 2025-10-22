@@ -7,6 +7,18 @@
 
 This repository provides both a **library crate** (`hybrid_screen_capture`) and **binary applications**. You can use it as a command-line tool to record the screen, or integrate the library into your own Rust projects. The code is kept intentionally small and readable.
 
+## Pipeline Architecture
+
+![Pipeline Architecture](docs/pipeline-architecture.svg)
+
+**Modular Architecture**: The system is designed with clear separation between **capture/streaming infrastructure** (producer) and **LLM integration** (consumer), enabling easy extension to multiple vision language model providers.
+
+- **🎥 Producer**: Cross-platform screen capture with token-efficient scaling
+- **📡 Transport**: Low-latency RTSP streaming with H.264 encoding  
+- **🤖 Consumer**: LLM-specific adaptors for AI integration
+
+For detailed information about the pipeline architecture, LLM integration, and development roadmap, see [`docs/pipeline-architecture.md`](docs/pipeline-architecture.md).
+
 ## Library Architecture & Performance
 
 **cap is a Rust framework** optimized for real-time screen capture with exceptional performance characteristics:
@@ -317,7 +329,7 @@ cap \
 For a more user-friendly experience, there's an interactive desktop app available:
 
 ```bash
-cd desktop-app
+cd examples/desktop-app
 cargo run
 ```
 
@@ -328,7 +340,7 @@ This provides an interactive command-line interface with prompts for all setting
 For users who prefer a web-based interface, there's a WASM-based web configurator that runs in any modern browser:
 
 ```bash
-cd desktop-app
+cd examples/desktop-app
 trunk serve
 ```
 
@@ -459,23 +471,4 @@ Try the standalone RTSP demo that generates synthetic frames:
 ```bash
 cargo run --bin cap-rtsp-demo -- --width 1280 --height 720 --fps 30
 # Then open: vlc rtsp://127.0.0.1:8554/cap
-```
-
-### RTSP for VLM Integration
-
-The RTSP streaming is optimized for AI vision models:
-
-- **Real-time processing**: Sub-frame latency with bounded queues
-- **VLM-optimized scaling**: Token-efficient frame preprocessing
-- **Gundam tiling**: DeepSeek-OCR compatible multi-tile output
-- **Hardware acceleration**: Support for NVENC, VAAPI, VideoToolbox encoders
-
-### Building with RTSP
-
-```bash
-# Build with RTSP support
-cargo build --release --features rtsp-streaming
-
-# Install GStreamer RTSP server libraries (Ubuntu/Debian)
-sudo apt install libgstrtspserver-1.0-dev gstreamer1.0-rtsp
 ```
