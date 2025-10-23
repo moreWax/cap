@@ -1,12 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
-use hybrid_screen_capture::config::CaptureConfig;
-use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
+use hybrid_screen_capture::config::config::CaptureConfig;
 
 #[cfg(feature = "rtsp-streaming")]
-use cap_rtsp::{BgraFrame, RtspConfig, RtspPublisher, frame_from_bgra, start_server};
+use cap_rtsp::{BgraFrame, RtspConfig, RtspPublisher, start_server};
 
 /// Minimal, human-friendly hybrid screen capture:
 /// - Windows/macOS/X11: scrap + ffmpeg (subprocess)
@@ -134,8 +131,24 @@ async fn run_rtsp_mode(args: Args) -> Result<()> {
         args.rtsp_port
     );
 
-    // Configure RTSP server with scaling if requested
-    let (width, height) = if let Some(preset) = args.scale_preset {
+    // Configure RTSP server with scaling or Gundam dimensions
+    let (width, height) = if args.gundam {
+        // Gundam mode: calculate composite frame dimensions
+        use cap_scale::gundam::choose_grid;
+        let (cols, rows) = choose_grid(1920, 1080); // Use default screen size for grid calculation
+        let num_tiles = (cols * rows).min(9) as usize;
+        let total_elements = num_tiles + 1;
+        let gundam_cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
+        let tile_side = 640u32;
+        let frame_width = gundam_cols * tile_side;
+        let frame_height =
+            (((total_elements as u32 + gundam_cols - 1) / gundam_cols) * tile_side).max(tile_side);
+        println!(
+            "Gundam mode: {} tiles + global view → {}x{} composite frame",
+            num_tiles, frame_width, frame_height
+        );
+        (frame_width, frame_height)
+    } else if let Some(preset) = args.scale_preset {
         // Use scaled resolution for VLM efficiency
         match preset {
             cap_scale::presets::TokenPreset::P2_56_Long640 => (640, 400), // Approximate scaled size
@@ -186,7 +199,10 @@ fn capture_to_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     Err(anyhow::anyhow!("Unsupported platform for RTSP streaming"))
 }
 
-#[cfg(any(target_os = "windows", target_os = "macos"))]
+#[cfg(all(
+    feature = "rtsp-streaming",
+    any(target_os = "windows", target_os = "macos")
+))]
 fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     use scrap::{Capturer, Display};
     use std::thread;
@@ -225,8 +241,8 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
         (w, h, cap)
     };
 
-    // Initialize scaling resources if needed
-    let (mut resizer, mut staging, mut scaled_buffer, output_size) =
+    // Initialize scaling or Gundam resources
+    let (mut resizer, mut staging, mut scaled_buffer, output_size, gundam_buffers) =
         if let Some(preset) = args.scale_preset {
             use cap_scale::presets::{AspectMode, Size, build_plan};
             let input_size = Size {
@@ -235,7 +251,7 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
             };
             let plan = build_plan(input_size, preset.to_target(), AspectMode::Preserve);
             let scaled_size = plan.out.w as usize * plan.out.h as usize * 4;
-            let mut buffer = vec![0u8; scaled_size];
+            let buffer = vec![0u8; scaled_size];
             println!(
                 "Scaling enabled: {}x{} → {}x{} (scaling preset)",
                 w, h, plan.out.w, plan.out.h
@@ -247,13 +263,52 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                 )),
                 Some(buffer),
                 Some(plan.out),
+                None, // No Gundam buffers for scaling mode
             )
         } else if args.gundam {
-            return Err(anyhow::anyhow!(
-                "Gundam mode not yet implemented for RTSP streaming"
-            ));
+            use cap_scale::gundam::{GundamCfg, GundamOutputs, choose_grid};
+            let (cols, rows) = choose_grid(w as u32, h as u32);
+            let num_tiles = (cols * rows).min(9) as usize;
+            let cfg = GundamCfg::default();
+
+            // Pre-allocate tile buffers
+            let mut tile_buffers = Vec::with_capacity(num_tiles);
+            for _ in 0..num_tiles {
+                tile_buffers.push(vec![
+                    0u8;
+                    (cfg.tile_side as usize) * (cfg.tile_side as usize) * 4
+                ]);
+            }
+
+            // Pre-allocate global buffer
+            let mut global_buffer =
+                vec![0u8; (cfg.global_side as usize) * (cfg.global_side as usize) * 4];
+
+            // Create tile buffer references for GundamOutputs
+            let mut tile_refs: Vec<&mut [u8]> =
+                tile_buffers.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+            let gundam_outputs = GundamOutputs {
+                tiles: tile_refs,
+                global: global_buffer.as_mut_slice(),
+            };
+
+            println!(
+                "Gundam mode: {}x{} input → {} tiles + global view arranged in composite frame",
+                w, h, num_tiles
+            );
+
+            (
+                Some(Resizer::new()),
+                Some(cap_scale::cpu::Staging::with_capacity(
+                    w as usize * 4 * h as usize,
+                )),
+                None, // No single scaled buffer for Gundam
+                None, // Output size will be determined by composite arrangement
+                Some((tile_buffers, global_buffer, gundam_outputs, cfg)),
+            )
         } else {
-            (None, None, None, None)
+            (None, None, None, None, None)
         };
 
     // Frame pacing
@@ -276,11 +331,12 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                     ));
                 }
 
-                // Apply scaling if enabled
+                // Apply scaling or Gundam processing
                 let data_to_send =
-                    if let (Some(resizer), Some(staging), Some(buffer), Some(output_size)) =
+                    if let (Some(resizer), Some(staging), Some(buffer), Some(_output_size)) =
                         (&mut resizer, &mut staging, &mut scaled_buffer, &output_size)
                     {
+                        // Scaling mode
                         use cap_scale::cpu::scale_bgra_cpu;
                         use cap_scale::presets::{AspectMode, Size, build_plan};
 
@@ -307,6 +363,42 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                             Some(staging),
                         )?;
                         buffer.clone()
+                    } else if let Some((
+                        ref mut tile_buffers,
+                        ref mut global_buffer,
+                        ref mut gundam_outputs,
+                        cfg,
+                    )) = &mut gundam_buffers
+                    {
+                        // Gundam mode
+                        use cap_scale::gundam::gundam_pack_cpu;
+
+                        // Update tile buffer references (they may have been moved)
+                        let mut tile_refs: Vec<&mut [u8]> =
+                            tile_buffers.iter_mut().map(|v| v.as_mut_slice()).collect();
+                        gundam_outputs.tiles = tile_refs;
+                        gundam_outputs.global = global_buffer.as_mut_slice();
+
+                        // Process frame with Gundam
+                        gundam_pack_cpu(
+                            resizer.as_mut().unwrap(),
+                            frame_data,
+                            w as u32,
+                            h as u32,
+                            w as usize * 4,
+                            *cfg,
+                            staging.as_mut().unwrap(),
+                            *gundam_outputs,
+                        )?;
+
+                        // Arrange tiles and global into composite frame
+                        let (composite, _, _) = cap_rtsp::arrange_gundam_composite(
+                            tile_buffers,
+                            global_buffer,
+                            cfg.tile_side,
+                            cfg.global_side,
+                        );
+                        composite
                     } else {
                         frame_data.to_vec()
                     };
@@ -314,11 +406,40 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                 // Create RTSP frame
                 let rtsp_frame = BgraFrame {
                     data: Arc::new(data_to_send),
-                    width: output_size.map(|s| s.w).unwrap_or(w as u32),
-                    height: output_size.map(|s| s.h).unwrap_or(h as u32),
-                    stride: output_size
-                        .map(|s| s.w as usize * 4)
-                        .unwrap_or(w as usize * 4),
+                    width: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
+                        // Calculate composite frame dimensions
+                        let num_tiles = tile_buffers.len();
+                        let total_elements = num_tiles + 1;
+                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
+                        cols * cfg.tile_side
+                    } else if let Some(size) = output_size {
+                        size.w
+                    } else {
+                        w as u32
+                    },
+                    height: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
+                        // Calculate composite frame dimensions
+                        let num_tiles = tile_buffers.len();
+                        let total_elements = num_tiles + 1;
+                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
+                        let rows = ((total_elements as u32 + cols - 1) / cols).max(1);
+                        rows * cfg.tile_side
+                    } else if let Some(size) = output_size {
+                        size.h
+                    } else {
+                        h as u32
+                    },
+                    stride: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
+                        // Calculate composite frame dimensions
+                        let num_tiles = tile_buffers.len();
+                        let total_elements = num_tiles + 1;
+                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
+                        (cols * cfg.tile_side * 4) as usize
+                    } else if let Some(size) = output_size {
+                        size.w as usize * 4
+                    } else {
+                        w as usize * 4
+                    },
                     pts_ns: None, // Let RTSP handle timing
                 };
 
@@ -345,7 +466,7 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "rtsp-streaming"))]
 fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     // Try to use scrap for Linux X11 capture
     #[cfg(feature = "screen-capture")]
@@ -391,7 +512,7 @@ fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                 };
                 let plan = build_plan(input_size, preset.to_target(), AspectMode::Preserve);
                 let scaled_size = plan.out.w as usize * plan.out.h as usize * 4;
-                let mut buffer = vec![0u8; scaled_size];
+                let buffer = vec![0u8; scaled_size];
                 println!(
                     "Scaling enabled: {}x{} → {}x{} (scaling preset)",
                     w, h, plan.out.w, plan.out.h
@@ -434,7 +555,7 @@ fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
 
                     // Apply scaling if enabled
                     let data_to_send =
-                        if let (Some(resizer), Some(staging), Some(buffer), Some(output_size)) =
+                        if let (Some(resizer), Some(staging), Some(buffer), Some(_output_size)) =
                             (&mut resizer, &mut staging, &mut scaled_buffer, &output_size)
                         {
                             use cap_scale::cpu::scale_bgra_cpu;
@@ -507,7 +628,7 @@ fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "rtsp-streaming"))]
 fn capture_x11_synthetic_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     // Fallback to synthetic frames when scrap is not available
     println!("X11 RTSP streaming not available, using synthetic frames for demonstration...");
@@ -558,33 +679,6 @@ fn capture_x11_synthetic_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Resu
     }
 
     Ok(())
-}
-
-#[cfg(feature = "rtsp-streaming")]
-fn generate_synthetic_frame(width: u32, height: u32, frame_idx: u64, fps: u32) -> BgraFrame {
-    let mut data = vec![0u8; (width * height * 4) as usize];
-
-    // Create a moving gradient pattern
-    let time = frame_idx as f32 / fps as f32;
-    let wave_speed = 1.0;
-
-    for y in 0..height {
-        for x in 0..width {
-            let idx = ((y * width + x) * 4) as usize;
-
-            // Moving wave pattern
-            let wave =
-                ((x as f32 * 0.005 + y as f32 * 0.005 + time * wave_speed).sin() + 1.0) * 0.5;
-
-            // BGRA format
-            data[idx] = (wave * 255.0) as u8; // Blue
-            data[idx + 1] = ((1.0 - wave) * 255.0) as u8; // Green
-            data[idx + 2] = (wave * 0.5 * 255.0) as u8; // Red
-            data[idx + 3] = 255; // Alpha
-        }
-    }
-
-    frame_from_bgra(data, width, height, fps, frame_idx)
 }
 
 /// Parse duration string like "30s", "2m", "1h" into seconds

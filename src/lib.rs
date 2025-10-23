@@ -85,10 +85,11 @@
 
 use anyhow::{Result, anyhow};
 
-pub mod buffer_pool;
+pub mod capture;
 pub mod config;
-pub mod performance_analysis;
-pub mod ring_buffer;
+pub mod core;
+#[cfg(feature = "rtsp-streaming")]
+pub mod processing;
 
 /// Configuration options for screen capture operations.
 ///
@@ -280,7 +281,7 @@ async fn dispatch_wayland(options: CaptureOptions) -> Result<()> {
     #[cfg(feature = "wayland-pipe")]
     {
         println!("Detected Wayland session → using Portal + PipeWire (ashpd) + GStreamer …");
-        return wayland::capture_gstreamer(&options).await;
+        return capture::wayland::capture_gstreamer(&options).await;
     }
     #[cfg(not(feature = "wayland-pipe"))]
     {
@@ -290,7 +291,7 @@ Enable it with: cargo run --release --features wayland-pipe\n\
 Note: This requires GStreamer + dev headers (see README). Falling back to scrap + FFmpeg, which may not work under Wayland."
         );
         #[cfg(feature = "screen-capture")]
-        return scrap::capture_ffmpeg(options).await;
+        return capture::scrap::capture_ffmpeg(options).await;
         #[cfg(not(feature = "screen-capture"))]
         return Err(anyhow!(
             "Screen capture not available - enable with: cargo run --features screen-capture"
@@ -302,7 +303,7 @@ Note: This requires GStreamer + dev headers (see README). Falling back to scrap 
 async fn dispatch_x11(options: CaptureOptions) -> Result<()> {
     println!("Detected X11 session → using scrap + FFmpeg …");
     #[cfg(feature = "screen-capture")]
-    return scrap::capture_ffmpeg(options).await;
+    return capture::scrap::capture_ffmpeg(options).await;
     #[cfg(not(feature = "screen-capture"))]
     return Err(anyhow!(
         "Screen capture not available - enable with: cargo run --features screen-capture"
@@ -313,7 +314,7 @@ async fn dispatch_x11(options: CaptureOptions) -> Result<()> {
 async fn dispatch_desktop(options: CaptureOptions) -> Result<()> {
     println!("Using scrap + FFmpeg …");
     #[cfg(feature = "screen-capture")]
-    return scrap::capture_ffmpeg(options).await;
+    return capture::scrap::capture_ffmpeg(options).await;
     #[cfg(not(feature = "screen-capture"))]
     return Err(anyhow!(
         "Screen capture not available - enable with: cargo run --features screen-capture"
@@ -327,8 +328,3 @@ fn is_wayland_session() -> bool {
         .map(|v| v.eq_ignore_ascii_case("wayland"))
         .unwrap_or(false)
 }
-
-#[cfg(feature = "screen-capture")]
-mod scrap;
-#[cfg(all(target_os = "linux", feature = "wayland-pipe"))]
-mod wayland;
