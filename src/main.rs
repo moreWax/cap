@@ -4,6 +4,10 @@ use hybrid_screen_capture::config::config::CaptureConfig;
 
 #[cfg(feature = "rtsp-streaming")]
 use cap_rtsp::{BgraFrame, RtspConfig, RtspPublisher, start_server};
+#[cfg(feature = "rtsp-streaming")]
+use std::sync::Arc;
+#[cfg(feature = "rtsp-streaming")]
+use std::time::{Duration, Instant};
 
 /// Minimal, human-friendly hybrid screen capture:
 /// - Windows/macOS/X11: scrap + ffmpeg (subprocess)

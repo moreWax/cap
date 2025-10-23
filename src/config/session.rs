@@ -28,9 +28,6 @@
 //! - Runtime execution follows linear, predictable paths
 //! - No conditional logic in hot processing loops
 
-// Standard library imports
-use std::sync::Arc;
-
 // External crate imports
 use anyhow::Result;
 use async_trait::async_trait;
@@ -139,7 +136,23 @@ impl CaptureSessionBuilder {
     /// Add RTSP streaming output.
     pub fn with_rtsp_stream(mut self, port: u16, width: u32, height: u32, fps: u32) -> Self {
         use crate::processing::processing::RtspStream;
-        // Create RTSP stream configuration
+
+        // Create RTSP configuration
+        let rtsp_config = cap_rtsp::RtspConfig {
+            port,
+            mount: "/cap".into(),
+            width,
+            height,
+            framerate: fps,
+            encoder: None,
+            appsrc_max_bytes: Some(8 * 1024 * 1024),
+        };
+
+        // Start RTSP server
+        let (publisher, server_handle) =
+            cap_rtsp::start_server(rtsp_config).expect("Failed to start RTSP server");
+
+        // Create stream configuration
         let config = StreamConfig {
             width,
             height,
@@ -149,22 +162,29 @@ impl CaptureSessionBuilder {
                 mount: "/cap".into(),
             },
         };
+
         self.streams.push(Box::new(RtspStream {
-            publisher: todo!("RTSP publisher creation"),
+            publisher,
             config,
+            _server_handle: Some(server_handle),
         }));
         self
     }
 
     /// Add file output stream.
-    pub fn with_file_output(self, path: String, width: u32, height: u32, fps: u32) -> Self {
-        let _config = StreamConfig {
+    #[cfg(feature = "rtsp-streaming")]
+    pub fn with_file_output(mut self, path: String, width: u32, height: u32, fps: u32) -> Self {
+        use crate::processing::processing::FileStream;
+
+        let config = StreamConfig {
             width,
             height,
             fps,
-            format: StreamFormat::File { path },
+            format: StreamFormat::File { path: path.clone() },
         };
-        // TODO: Implement file stream
+
+        self.streams
+            .push(Box::new(FileStream::new(path, config.clone())));
         self
     }
 
@@ -176,19 +196,19 @@ impl CaptureSessionBuilder {
 
     /// Build the capture session with the configured components.
     pub fn build(self) -> Result<CaptureSession> {
-        let mut pipeline = ProcessingPipeline::new(10);
+        let mut pipeline = ProcessingPipeline::new();
         for processor in self.processors {
             pipeline.processors.push(processor);
         }
 
         // Create multiplexer config from first stream (simplified)
-        let multiplexer_config = if let Some(first_stream) = self.streams.first() {
+        let _multiplexer_config = if let Some(first_stream) = self.streams.first() {
             first_stream.config().clone()
         } else {
             return Err(anyhow::anyhow!("At least one stream must be configured"));
         };
 
-        let mut multiplexer = StreamMultiplexer::new(multiplexer_config);
+        let mut multiplexer = StreamMultiplexer::new();
         for stream in self.streams {
             multiplexer.streams.push(stream);
         }
@@ -203,4 +223,11 @@ impl CaptureSessionBuilder {
             capture_source,
         })
     }
+}
+
+/// RTSP stream implementation.
+pub struct RtspStream {
+    pub publisher: cap_rtsp::RtspPublisher,
+    pub config: StreamConfig,
+    _server_handle: std::thread::JoinHandle<()>,
 }

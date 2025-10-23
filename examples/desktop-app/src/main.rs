@@ -1,6 +1,6 @@
 use async_channel::{Receiver, Sender, unbounded};
 use eframe::egui;
-use hybrid_screen_capture::config::CaptureConfig;
+use hybrid_screen_capture::config::config::CaptureConfig;
 use tokio::runtime::Runtime;
 
 #[derive(Default)]

@@ -32,6 +32,12 @@ use anyhow::Result;
 use async_trait::async_trait;
 use cap_rtsp::BgraFrame;
 use futures_util::future::join_all;
+#[cfg(feature = "rtsp-streaming")]
+use gstreamer as gst;
+#[cfg(feature = "rtsp-streaming")]
+use gstreamer::prelude::{Cast, ElementExt, GstBinExt};
+#[cfg(feature = "rtsp-streaming")]
+use gstreamer_app as gst_app;
 use std::sync::Arc;
 
 /// Size representation for frame dimensions.
@@ -63,6 +69,15 @@ pub enum StreamFormat {
 /// Implement this trait to create custom frame processors.
 #[async_trait]
 pub trait FrameProcessor: Send + Sync {
+    /// Initialize the processor with input size and return output size.
+    ///
+    /// # Arguments
+    /// * `input_size` - Size of input frames
+    ///
+    /// # Returns
+    /// Size of output frames after processing
+    async fn initialize(&mut self, input_size: Size) -> Result<Size>;
+
     /// Process a single frame.
     ///
     /// # Arguments
@@ -91,15 +106,13 @@ pub trait Stream: Send + Sync {
 /// Chains multiple processors together for sequential frame processing.
 pub struct ProcessingPipeline {
     pub processors: Vec<Box<dyn FrameProcessor>>,
-    buffer_size: usize,
 }
 
 impl ProcessingPipeline {
-    /// Create a new processing pipeline with the specified buffer size.
-    pub fn new(buffer_size: usize) -> Self {
+    /// Create a new processing pipeline.
+    pub fn new() -> Self {
         Self {
             processors: Vec::new(),
-            buffer_size,
         }
     }
 
@@ -107,8 +120,7 @@ impl ProcessingPipeline {
     pub async fn initialize(&mut self, input_size: Size) -> Result<Size> {
         let mut current_size = input_size;
         for processor in &mut self.processors {
-            // Processors would modify current_size based on their transformations
-            // For now, assume size remains the same
+            current_size = processor.initialize(current_size).await?;
         }
         Ok(current_size)
     }
@@ -134,15 +146,13 @@ impl ProcessingPipeline {
 /// Multiplexer for broadcasting frames to multiple streams concurrently.
 pub struct StreamMultiplexer {
     pub streams: Vec<Box<dyn Stream>>,
-    config: StreamConfig,
 }
 
 impl StreamMultiplexer {
-    /// Create a new stream multiplexer with the given configuration.
-    pub fn new(config: StreamConfig) -> Self {
+    /// Create a new stream multiplexer.
+    pub fn new() -> Self {
         Self {
             streams: Vec::new(),
-            config,
         }
     }
 
@@ -197,12 +207,36 @@ pub struct GundamProcessor {
 
 #[async_trait]
 impl FrameProcessor for GundamProcessor {
+    async fn initialize(&mut self, input_size: Size) -> Result<Size> {
+        // Estimate number of tiles based on input dimensions
+        // Use the same logic as choose_grid but simplified
+        let cols = ((input_size.w as f32 / 1024.0).ceil() as u32).clamp(1, 3);
+        let rows = ((input_size.h as f32 / 1024.0).ceil() as u32).clamp(1, 3);
+        let num_tiles = (cols * rows).clamp(self.cfg.min_tiles, self.cfg.max_tiles);
+
+        // Calculate output size based on Gundam configuration
+        // The output is a composite grid of tiles + global view
+        let total_elements = num_tiles + 1; // tiles + global view
+        let cols_out = ((total_elements as f32).sqrt().ceil() as u32).max(1);
+        let rows_out = (((total_elements as u32 + cols_out - 1) / cols_out) as usize).max(1) as u32;
+
+        // Each element is tile_side x tile_side, except global which gets scaled
+        let output_width = cols_out * self.cfg.tile_side;
+        let output_height = rows_out * self.cfg.tile_side;
+
+        self.output_size = Size {
+            w: output_width,
+            h: output_height,
+        };
+        Ok(self.output_size)
+    }
+
     async fn process_frame(&mut self, frame: BgraFrame) -> Result<Option<BgraFrame>> {
         // Process frame with Gundam tiling
         use cap_scale::gundam::gundam_pack_cpu;
 
         // Update tile buffer references
-        let mut tile_refs: Vec<&mut [u8]> = self
+        let tile_refs: Vec<&mut [u8]> = self
             .tile_buffers
             .iter_mut()
             .map(|v| v.as_mut_slice())
@@ -249,6 +283,7 @@ impl FrameProcessor for GundamProcessor {
 pub struct RtspStream {
     pub publisher: cap_rtsp::RtspPublisher,
     pub config: StreamConfig,
+    pub _server_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 #[async_trait]
@@ -268,6 +303,139 @@ impl Stream for RtspStream {
 
     async fn initialize(&mut self) -> Result<()> {
         // RTSP publisher is already initialized
+        Ok(())
+    }
+}
+
+/// File stream implementation for saving frames to disk.
+#[cfg(feature = "rtsp-streaming")]
+pub struct FileStream {
+    pub config: StreamConfig,
+    pub path: String,
+    pub frame_count: u64,
+    pub pipeline: Option<gst::Pipeline>,
+    pub appsrc: Option<gst_app::AppSrc>,
+    pub initialized: bool,
+}
+
+#[cfg(feature = "rtsp-streaming")]
+impl FileStream {
+    /// Create a new file stream.
+    pub fn new(path: String, config: StreamConfig) -> Self {
+        Self {
+            config,
+            path,
+            frame_count: 0,
+            pipeline: None,
+            appsrc: None,
+            initialized: false,
+        }
+    }
+}
+
+#[cfg(feature = "rtsp-streaming")]
+#[async_trait]
+impl Stream for FileStream {
+    async fn send_frame(&mut self, frame: BgraFrame) -> Result<()> {
+        if !self.initialized {
+            return Ok(()); // Skip frames until initialized
+        }
+
+        self.frame_count += 1;
+
+        if let Some(appsrc) = &self.appsrc {
+            // Allocate buffer and copy data
+            let mut buffer = match gst::Buffer::with_size(frame.data.len()) {
+                Ok(b) => b,
+                Err(_) => return Ok(()),
+            };
+            {
+                let bufw = buffer.get_mut().unwrap();
+                // Set timestamp
+                let pts = frame
+                    .pts_ns
+                    .unwrap_or(self.frame_count * (1_000_000_000u64 / self.config.fps as u64));
+                bufw.set_pts(gst::ClockTime::from_nseconds(pts));
+
+                // Copy bytes
+                if let Ok(mut map) = bufw.map_writable() {
+                    map.as_mut_slice().copy_from_slice(&frame.data);
+                }
+            }
+
+            // Push buffer to pipeline
+            let _ = appsrc.push_buffer(buffer);
+        }
+
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
+        if let Some(appsrc) = &self.appsrc {
+            // Send EOS to signal end of stream
+            let _ = appsrc.end_of_stream();
+        }
+
+        if let Some(pipeline) = &self.pipeline {
+            // Stop the pipeline
+            let _ = pipeline.set_state(gst::State::Null);
+        }
+
+        println!(
+            "File stream '{}' saved {} frames",
+            self.path, self.frame_count
+        );
+        Ok(())
+    }
+
+    fn config(&self) -> &StreamConfig {
+        &self.config
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        if self.initialized {
+            return Ok(());
+        }
+
+        // Initialize GStreamer
+        gst::init()?;
+
+        // Create pipeline for file encoding
+        let launch = format!(
+            "appsrc name=src is-live=true format=time do-timestamp=true caps=video/x-raw,format=BGRA,width={},height={},framerate={}/1 \
+             ! videoconvert ! videoscale ! video/x-raw,format=I420 \
+             ! x264enc tune=zerolatency speed-preset=veryfast bitrate=4000 \
+             ! h264parse ! mp4mux ! filesink location={}",
+            self.config.width, self.config.height, self.config.fps, self.path
+        );
+
+        let pipeline = match gst::parse::launch(&launch) {
+            Ok(element) => match element.downcast::<gst::Pipeline>() {
+                Ok(pipeline) => pipeline,
+                Err(_) => return Err(anyhow::anyhow!("Failed to create pipeline")),
+            },
+            Err(e) => return Err(anyhow::anyhow!("Failed to parse pipeline: {}", e)),
+        };
+
+        // Get appsrc element
+        let appsrc = pipeline
+            .by_name("src")
+            .and_then(|element| element.downcast::<gst_app::AppSrc>().ok())
+            .ok_or_else(|| anyhow::anyhow!("Failed to get appsrc element"))?;
+
+        // Configure appsrc
+        appsrc.set_format(gst::Format::Time);
+        appsrc.set_is_live(true);
+        appsrc.set_do_timestamp(true);
+
+        // Start the pipeline
+        pipeline.set_state(gst::State::Playing)?;
+
+        self.pipeline = Some(pipeline);
+        self.appsrc = Some(appsrc);
+        self.initialized = true;
+
+        println!("Initialized file stream to '{}'", self.path);
         Ok(())
     }
 }

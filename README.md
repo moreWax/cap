@@ -31,13 +31,17 @@ For detailed information about the pipeline architecture, LLM integration, and d
 
 ### 📝 **Source Code Distribution** (3,207 lines total)
 - **Core Library (`lib.rs`)**: 312 lines - Public API and platform dispatch
-- **Ring Buffer (`ring_buffer.rs`)**: 419 lines - Memory-mapped zero-copy buffering
-- **Buffer Pool (`buffer_pool.rs`)**: 321 lines - Zero-allocation frame reuse
-- **Performance Analysis (`performance_analysis.rs`)**: 382 lines - Benchmarking & metrics
+- **Core Infrastructure**:
+  - **Ring Buffer (`core/ring_buffer.rs`)**: 419 lines - Memory-mapped zero-copy buffering
+  - **Buffer Pool (`core/buffer_pool.rs`)**: 321 lines - Zero-allocation frame reuse
+  - **Performance Analysis (`core/performance_analysis.rs`)**: 382 lines - Benchmarking & metrics
 - **Platform Backends**:
-  - **Wayland (`wayland.rs`)**: 345 lines - Portal + PipeWire + GStreamer
-  - **Scrap (`scrap.rs`)**: 575 lines - Windows/macOS/X11 capture
-- **Configuration (`config.rs`)**: 349 lines - Settings and validation
+  - **Wayland (`capture/wayland.rs`)**: 345 lines - Portal + PipeWire + GStreamer
+  - **Scrap (`capture/scrap.rs`)**: 575 lines - Windows/macOS/X11 capture
+- **Configuration & Session Management**:
+  - **Basic Config (`config/config.rs`)**: 349 lines - Settings and validation
+  - **Session Management (`config/session.rs`)**: High-level capture orchestration
+- **Processing Pipeline (`processing/`)**: RTSP streaming and frame processing
 - **CLI (`main.rs`)**: 99 lines - Command-line interface
 
 ### ⚡ **Zero-Copy Performance Features**

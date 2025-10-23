@@ -8,7 +8,7 @@
 //! In a real app, you'd replace the synthetic frames with cap::scrap frames.
 
 use anyhow::Result;
-use cap_rtsp::{frame_from_bgra, start_server, BgraFrame, RtspConfig, RtspPublisher};
+use cap_rtsp::{frame_from_bgra, start_server, BgraFrame, RtspConfig};
 use clap::Parser;
 use std::thread;
 use std::time::{Duration, Instant};

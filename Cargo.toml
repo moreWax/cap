@@ -1,10 +1,10 @@
 [workspace]
 members = [
     ".",
-    "cap_scale",
+    "cap-scale",
     "cap-rtsp",
-    "cap-rtsp-demo",
-    "desktop-app"
+    "examples/cap-rtsp-demo",
+    "examples/desktop-app"
 ]
 resolver = "2"
 
@@ -29,31 +29,39 @@ clap = { version = "4.5", features = ["derive"] }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros"], optional = true }
 memmap2 = "0.9"
 tempfile = "3.8"
-cap_scale = { path = "./cap_scale" }
-fast_image_resize = { version = "5", features = ["rayon"] }
+cap-scale = { path = "./cap-scale" }
 cap-rtsp = { path = "./cap-rtsp", optional = true }
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 serde_json = "1.0"
 base64 = "0.22"
+image = "0.25"
+fast_image_resize = "5.0"
+async-trait = "0.1"
+futures-util = "0.3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tokio = { version = "1.47", features = ["rt-multi-thread"], optional = true }
 ashpd = { version = "0.12", optional = true }
 gstreamer = { version = "0.24", optional = true }
+gstreamer-app = { version = "0.24", optional = true }
 gstreamer-video = { version = "0.24", optional = true }
 x11rb = { version = "0.13", features = ["image"], optional = true }
 
 [[bin]]
 name = "check_deps"
-path = "src/bin/check_deps.rs"
+path = "tools/bin/check_deps.rs"
 
 [[bin]]
 name = "benchmark"
-path = "src/bin/benchmark.rs"
+path = "tools/bin/benchmark.rs"
 
 [[bin]]
 name = "test_qwen_vl"
-path = "test_qwen_vl.rs"
+path = "tests/test_qwen_vl.rs"
+
+[[bin]]
+name = "test_token_savings"
+path = "tests/test_token_savings.rs"
 
 [features]
 # Screen capture functionality. Enabled by default but disabled for WASM.
@@ -62,7 +70,7 @@ screen-capture = ["scrap", "dep:tokio"]
 # Wayland pipeline via ashpd + GStreamer. Enabled by default.
 wayland-pipe = ["ashpd", "gstreamer", "gstreamer-video"]
 # RTSP streaming functionality
-rtsp-streaming = ["cap-rtsp", "x11rb"]
+rtsp-streaming = ["cap-rtsp", "x11rb", "gstreamer", "gstreamer-app", "gstreamer-video"]
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Disable screen capture for WASM targets since browsers can't capture screens
