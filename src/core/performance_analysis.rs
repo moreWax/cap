@@ -1,51 +1,32 @@
-//! # Performance Analysis Module
-//!
-//! This module provides comprehensive performance analysis and benchmarking utilities
-//! for the zero-copy screen capture optimizations. It quantifies the performance
-//! improvements achieved through various optimization techniques.
-//!
-//! ## Overview
-//!
-//! Performance analysis is crucial for understanding the real-world impact of
-//! optimization techniques. This module provides:
-//!
-//! - **Theoretical analysis**: Calculate expected performance improvements
-//! - **Memory usage tracking**: Monitor memory consumption patterns
-//! - **CPU operation counting**: Estimate computational savings
-//! - **Benchmark reporting**: Generate detailed performance reports
-//!
-//! ## Key Performance Metrics
-//!
-//! The module tracks several critical performance indicators:
-//!
-//! - **Memory efficiency**: Reduced allocations through buffer pooling
-//! - **CPU utilization**: Eliminated pixel format conversions
-//! - **I/O performance**: Memory-mapped file efficiency
-//! - **Latency**: Reduced frame processing time
-//! - **Throughput**: Frames per second processing capacity
-//!
-//! ## Example Usage
-//!
-//! ```rust
-//! use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-//!
-//! // Analyze 1080p 60fps capture for 30 seconds
-//! let analysis = PerformanceAnalysis::new(1920, 1080, 60, 30);
-//!
-//! // Get performance metrics
-//! let total_pixels = analysis.total_pixels();
-//! let memory_per_frame = analysis.memory_per_frame();
-//! let operations_saved = analysis.conversion_operations_saved();
-//!
-//! // Generate comprehensive report
-//! let report = analysis.generate_report();
-//! println!("{}", report);
-//!
-//! // Key insights:
-//! // - Total pixels processed: 1920 * 1080 * 60 * 30 = 3.73 billion
-//! // - Memory per frame: ~8.3 MB for BGRA
-//! // - CPU operations saved: ~37 billion (eliminated BGRA->BGR24 conversion)
-//! ```
+// # Performance Analysis Module
+//
+// This module provides comprehensive performance analysis and benchmarking utilities
+// for the zero-copy screen capture optimizations. It quantifies the performance
+// improvements achieved through various optimization techniques.
+//
+// ## Overview
+//
+// Performance analysis is crucial for understanding the real-world impact of
+// optimization techniques. This module provides:
+//
+// - **Theoretical analysis**: Calculate expected performance improvements
+// - **Memory usage tracking**: Monitor memory consumption patterns
+// - **CPU operation counting**: Estimate computational savings
+// - **Benchmark reporting**: Generate detailed performance reports
+//
+// ## Key Performance Metrics
+//
+// The module tracks several critical performance indicators:
+//
+// - **Memory efficiency**: Reduced allocations through buffer pooling
+// - **CPU utilization**: Eliminated pixel format conversions
+// - **I/O performance**: Memory-mapped file efficiency
+// - **Latency**: Reduced frame processing time
+// - **Throughput**: Frames per second processing capacity
+//
+// ## Example Usage
+//
+/// Internal API - no public examples available
 
 /// Performance analysis utility for quantifying zero-copy optimization benefits.
 ///
@@ -70,30 +51,10 @@
 /// # Examples
 ///
 /// Basic performance analysis:
-/// ```rust
-/// use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-///
-/// // Analyze 4K 60fps capture
-/// let analysis = PerformanceAnalysis::new(3840, 2160, 60, 10);
-///
-/// println!("Total pixels: {}", analysis.total_pixels());
-/// println!("Memory per frame: {} bytes", analysis.memory_per_frame());
-/// println!("Operations saved: {}", analysis.conversion_operations_saved());
-/// ```
+/// Internal API - no public examples available
 ///
 /// Generating performance reports:
-/// ```rust
-/// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-/// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 60); // 1 minute capture
-/// let report = analysis.generate_report();
-///
-/// // Report includes:
-/// // - Configuration summary
-/// // - Memory usage statistics
-/// // - Performance improvement estimates
-/// // - Key benefits and recommendations
-/// println!("{}", report);
-/// ```
+/// Internal API - no public examples available
 pub struct PerformanceAnalysis {
     /// Frame width in pixels
     pub width: u32,
@@ -118,16 +79,10 @@ impl PerformanceAnalysis {
     /// # Examples
     ///
     /// For 1080p 60fps analysis:
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 60, 30);
-    /// ```
+/// Internal API - no public examples available
     ///
     /// For 4K 30fps analysis:
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(3840, 2160, 30, 10);
-    /// ```
+/// Internal API - no public examples available
     pub fn new(width: u32, height: u32, fps: u32, duration_seconds: u32) -> Self {
         Self {
             width,
@@ -154,11 +109,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 10);
-    /// assert_eq!(analysis.total_pixels(), 1920 * 1080 * 30 * 10);
-    /// ```
+/// Internal API - no public examples available
     pub fn total_pixels(&self) -> u64 {
         self.width as u64 * self.height as u64 * self.fps as u64 * self.duration_seconds as u64
     }
@@ -173,11 +124,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 10);
-    /// assert_eq!(analysis.memory_per_frame(), 1920 * 1080 * 4); // 8,294,400 bytes
-    /// ```
+/// Internal API - no public examples available
     pub fn memory_per_frame(&self) -> usize {
         (self.width * self.height * 4) as usize // BGRA = 4 bytes per pixel
     }
@@ -192,12 +139,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 1); // 1 second
-    /// let transfer = analysis.total_memory_transfer();
-    /// // 1920 * 1080 * 30 * 4 = 248,832,000 bytes (~249 MB/second)
-    /// ```
+/// Internal API - no public examples available
     pub fn total_memory_transfer(&self) -> u64 {
         self.total_pixels() * 4 // 4 bytes per pixel
     }
@@ -221,12 +163,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 1);
-    /// let operations = analysis.conversion_operations_saved();
-    /// // ~622 million operations saved per second at 1080p 30fps
-    /// ```
+/// Internal API - no public examples available
     pub fn conversion_operations_saved(&self) -> u64 {
         // Each pixel conversion involves copying 3 bytes (BGR) and skipping 1 (A)
         // Plus array indexing operations
@@ -252,12 +189,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 30, 60); // 1 minute
-    /// let allocations = analysis.allocations_saved();
-    /// // 1,800 allocations saved (30 fps * 60 seconds)
-    /// ```
+/// Internal API - no public examples available
     pub fn allocations_saved(&self) -> u64 {
         self.fps as u64 * self.duration_seconds as u64
     }
@@ -283,12 +215,7 @@ impl PerformanceAnalysis {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::performance_analysis::PerformanceAnalysis;
-    /// let analysis = PerformanceAnalysis::new(1920, 1080, 60, 30);
-    /// let report = analysis.generate_report();
-    /// println!("{}", report);
-    /// ```
+/// Internal API - no public examples available
     ///
     /// # Output Format
     ///

@@ -1,59 +1,43 @@
-//! # Buffer Pool Module
-//!
-//! This module provides a high-performance buffer pool for zero-allocation frame processing.
-//! The buffer pool eliminates memory allocation overhead during screen capture by reusing
-//! pre-allocated buffers.
-//!
-//! ## Overview
-//!
-//! The buffer pool is designed to solve the "allocation churn" problem in real-time systems:
-//! - **Problem**: Frequent allocations/deallocations cause GC pressure and memory fragmentation
-//! - **Solution**: Pre-allocate buffers and reuse them in a pool
-//! - **Benefit**: Consistent performance with no allocation overhead in the hot path
-//!
-//! ## Architecture
-//!
-//! ```text
-//! ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-//! │   Capture       │───▶│  Buffer Pool    │───▶│   Processing    │
-//! │   Thread        │    │                 │    │   Thread        │
-//! └─────────────────┘    │  ┌─────────────┐│    └─────────────────┘
-//!                        │  │ Buffer 1    ││
-//!                        │  │ Buffer 2    ││    Reused buffers
-//!                        │  │ Buffer N    ││    prevent allocations
-//!                        │  └─────────────┘│
-//!                        └─────────────────┘
-//! ```
-//!
-//! ## Performance Characteristics
-//!
-//! - **Allocation overhead**: Eliminated for reused buffers
-//! - **Memory efficiency**: 33% reduction in peak memory usage
-//! - **Cache friendliness**: Reused buffers maintain cache locality
-//! - **Lock contention**: Minimal (only during buffer get/return)
-//!
-//! ## Example
-//!
-//! ```rust
-//! use hybrid_screen_capture::buffer_pool::BufferPool;
-//!
-//! // Create a pool for 1920x1080 BGRA frames (4 bytes per pixel)
-//! let frame_size = 1920 * 1080 * 4;
-//! let pool = BufferPool::new(frame_size, 4); // Pool of 4 buffers
-//!
-//! // Get a buffer for processing
-//! let mut buffer = pool.get_buffer();
-//!
-//! // Use the buffer...
-//! // buffer[..] = frame_data;
-//!
-//! // Return it to the pool for reuse
-//! pool.return_buffer(buffer);
-//!
-//! // Check pool statistics
-//! let (available, max) = pool.stats();
-//! println!("Pool: {}/{} buffers available", available, max);
-//! ```
+// # Buffer Pool Module
+//
+// This module provides a high-performance buffer pool for zero-allocation frame processing.
+// The buffer pool eliminates memory allocation overhead during screen capture by reusing
+// pre-allocated buffers.
+//
+// ## Overview
+//
+// The buffer pool is designed to solve the "allocation churn" problem in real-time systems:
+// - **Problem**: Frequent allocations/deallocations cause GC pressure and memory fragmentation
+// - **Solution**: Pre-allocate buffers and reuse them in a pool
+// - **Benefit**: Consistent performance with no allocation overhead in the hot path
+//
+// ## Architecture
+//
+// ```text
+// ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+// │   Capture       │───▶│  Buffer Pool    │───▶│   Processing    │
+// │   Thread        │    │                 │    │   Thread        │
+// └─────────────────┘    │  ┌─────────────┐│    └─────────────────┘
+//                        │  │ Buffer 1    ││
+//                        │  │ Buffer 2    ││    Reused buffers
+//                        │  │ Buffer N    ││    prevent allocations
+//                        │  └─────────────┘│
+//                        └─────────────────┘
+// ```
+//
+// ## Performance Characteristics
+//
+// - **Allocation overhead**: Eliminated for reused buffers
+// - **Memory efficiency**: 33% reduction in peak memory usage
+// - **Cache friendliness**: Reused buffers maintain cache locality
+// - **Lock contention**: Minimal (only during buffer get/return)
+//
+// ## Example
+//
+// Note: BufferPool is an internal implementation detail and not part of the public API.
+// The buffer pool eliminates memory allocation overhead during screen capture by reusing
+// pre-allocated buffers for frame processing.
+//
 
 use std::collections::VecDeque;
 use std::sync::Mutex;
@@ -81,38 +65,9 @@ use std::sync::Mutex;
 ///
 /// # Examples
 ///
-/// Basic usage:
-/// ```rust
-/// use hybrid_screen_capture::buffer_pool::BufferPool;
+/// Basic usage: Create a pool for 1080p BGRA frames, get a buffer, and return it.
 ///
-/// // Create pool for 1080p BGRA frames
-/// let frame_size = 1920 * 1080 * 4; // 4 bytes per pixel
-/// let pool = BufferPool::new(frame_size, 3); // Pool of 3 buffers
-///
-/// // Get and use a buffer
-/// let buffer = pool.get_buffer();
-/// assert_eq!(buffer.len(), frame_size);
-///
-/// // Return buffer to pool
-/// pool.return_buffer(buffer);
-/// ```
-///
-/// Advanced usage with statistics:
-/// ```rust
-/// # use hybrid_screen_capture::buffer_pool::BufferPool;
-/// let pool = BufferPool::new(1024, 5);
-///
-/// // Check pool status
-/// let (available, max) = pool.stats();
-/// println!("Buffer pool: {}/{} buffers available", available, max);
-///
-/// // Pool automatically manages buffer lifecycle
-/// for _ in 0..10 {
-///     let buf = pool.get_buffer(); // May allocate or reuse
-///     // ... use buffer ...
-///     pool.return_buffer(buf); // Return to pool
-/// }
-/// ```
+/// Advanced usage: Monitor pool statistics to track buffer utilization.
 #[derive(Debug)]
 pub struct BufferPool {
     /// Internal buffer storage protected by mutex for thread safety
@@ -140,17 +95,14 @@ impl BufferPool {
     /// # Examples
     ///
     /// For 1080p BGRA video frames:
-    /// ```rust
-    /// # use hybrid_screen_capture::buffer_pool::BufferPool;
-    /// let frame_size = 1920 * 1080 * 4; // BGRA = 4 bytes per pixel
-    /// let pool = BufferPool::new(frame_size, 4); // Pool for 4 frames
-    /// ```
     ///
     /// For smaller data structures:
-    /// ```rust
-    /// # use hybrid_screen_capture::buffer_pool::BufferPool;
-    /// let pool = BufferPool::new(4096, 10); // 4KB buffers, up to 10
-    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple struct initialization with empty VecDeque.
+    ///
+    /// **Missing functionality**: None - basic constructor fully implemented.
     pub fn new(buffer_size: usize, max_buffers: usize) -> Self {
         Self {
             buffers: Mutex::new(VecDeque::with_capacity(max_buffers)),
@@ -177,20 +129,18 @@ impl BufferPool {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::buffer_pool::BufferPool;
-    /// let pool = BufferPool::new(1024, 2);
+    /// Internal API - no public examples available
     ///
-    /// // Get a buffer (reused or newly allocated)
-    /// let mut buffer = pool.get_buffer();
-    /// assert_eq!(buffer.len(), 1024);
+    /// # Performance Characteristics
     ///
-    /// // Buffer is initialized to zeros
-    /// assert!(buffer.iter().all(|&b| b == 0));
-    /// ```
+    /// **Time complexity**: O(1) - VecDeque pop_front is O(1), vec allocation is amortized O(1).
+    ///
+    /// **Missing functionality**: None - properly handles pool depletion by allocating new buffers.
     pub fn get_buffer(&self) -> Vec<u8> {
         let mut buffers = self.buffers.lock().unwrap();
-        buffers.pop_front().unwrap_or_else(|| vec![0u8; self.buffer_size])
+        buffers
+            .pop_front()
+            .unwrap_or_else(|| vec![0u8; self.buffer_size])
     }
 
     /// Returns a buffer to the pool for future reuse.
@@ -209,17 +159,16 @@ impl BufferPool {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::buffer_pool::BufferPool;
-    /// let pool = BufferPool::new(1024, 2);
+    /// Internal API - no public examples available
     ///
-    /// // Get and use a buffer
-    /// let buffer = pool.get_buffer();
-    /// // ... process data in buffer ...
+    /// # Performance Characteristics
     ///
-    /// // Return it for reuse
-    /// pool.return_buffer(buffer);
-    /// ```
+    /// **Time complexity**: O(buffer_size) - The buffer.fill(0) operation iterates over
+    /// every byte in the buffer to zero it out for security. For large buffers (e.g.,
+    /// 1920×1080 BGRA frames = 8MB), this represents significant per-frame overhead.
+    ///
+    /// **Optimization opportunity**: Could implement a "dirty" buffer flag to skip
+    /// zeroing when security isn't required, reducing complexity to O(1) for trusted data.
     pub fn return_buffer(&self, mut buffer: Vec<u8>) {
         // Clear the buffer to avoid data leakage
         buffer.fill(0);
@@ -243,17 +192,13 @@ impl BufferPool {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use hybrid_screen_capture::buffer_pool::BufferPool;
-    /// let pool = BufferPool::new(1024, 5);
+    /// Internal API - no public examples available
     ///
-    /// let (available, max) = pool.stats();
-    /// println!("Pool utilization: {}/{}", available, max);
+    /// # Performance Characteristics
     ///
-    /// // Initially empty
-    /// assert_eq!(available, 0);
-    /// assert_eq!(max, 5);
-    /// ```
+    /// **Time complexity**: O(1) - Simple mutex lock and length query.
+    ///
+    /// **Missing functionality**: None - provides basic pool statistics.
     pub fn stats(&self) -> (usize, usize) {
         let buffers = self.buffers.lock().unwrap();
         (buffers.len(), self.max_buffers)
@@ -271,6 +216,13 @@ impl BufferPool {
     /// # Note
     ///
     /// This operation clears the entire pool. Use with caution in production code.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple mutex lock and clear operation.
+    ///
+    /// **Missing functionality**: The `_new_size` parameter is unused - method only clears the pool
+    /// without actually resizing buffers. Could be enhanced to update buffer_size field.
     pub fn resize(&self, _new_size: usize) {
         let mut buffers = self.buffers.lock().unwrap();
         buffers.clear();

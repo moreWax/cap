@@ -258,6 +258,16 @@ static SHARED: OnceCell<Arc<Mutex<Shared>>> = OnceCell::new();
 ///
 /// The publisher can be cloned and shared across threads. The join handle
 /// should be kept to coordinate shutdown if needed.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - GStreamer initialization, channel creation, and thread spawning
+/// are all constant-time operations. The actual streaming complexity depends on frame rate
+/// and processing requirements.
+///
+/// **Missing functionality**: None - fully implements RTSP server initialization with proper
+/// threading and resource management.
+///
 pub fn start_server(cfg: RtspConfig) -> Result<(RtspPublisher, thread::JoinHandle<()>)> {
     // Initialize GStreamer once.
     gst::init()?;
@@ -468,6 +478,15 @@ impl RtspPublisher {
     ///
     /// Safe to call concurrently from multiple threads. The underlying
     /// crossbeam channel handles synchronization.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Channel send operations are constant time, with brief
+    /// blocking only under extreme queue pressure (channel capacity 3).
+    ///
+    /// **Missing functionality**: None - implements complete back-pressure handling with
+    /// graceful degradation under load.
+    ///
     pub fn send(&self, frame: BgraFrame) -> Result<()> {
         match self.tx.try_send(frame) {
             Ok(()) => Ok(()),
@@ -504,6 +523,14 @@ impl RtspPublisher {
 ///
 /// For complex scenarios with padded buffers or variable timing,
 /// construct `BgraFrame` directly.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple arithmetic and Arc wrapping operations.
+///
+/// **Missing functionality**: None - provides complete BGRA frame construction
+/// with automatic timestamp calculation.
+///
 pub fn frame_from_bgra(bytes: Vec<u8>, width: u32, height: u32, fps: u32, idx: u64) -> BgraFrame {
     let stride = width as usize * 4;
     let pts_ns = Some(idx * (1_000_000_000u64 / fps.max(1) as u64));
@@ -524,6 +551,16 @@ pub fn frame_from_bgra(bytes: Vec<u8>, width: u32, height: u32, fps: u32, idx: u
 /// [Tile3][Tile4][Empty ]
 ///
 /// Returns the composite frame data and its dimensions.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(num_tiles × tile_side² + global_side²) - Nested loops iterate
+/// over all pixels in tiles and global view. For typical values (4 tiles × 640×640 + 1024×1024),
+/// this represents O(10^7) operations per frame, which is acceptable for preprocessing.
+///
+/// **Missing functionality**: None - fully implements Gundam composite arrangement
+/// with proper grid layout and scaling.
+///
 pub fn arrange_gundam_composite(
     tiles: &[Vec<u8>],
     global: &[u8],
@@ -643,6 +680,15 @@ pub struct RtspStreamer {
 
 impl RtspStreamer {
     /// Create a new RTSP streamer with optional frame processing.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Delegates to start_server which performs constant-time
+    /// initialization operations.
+    ///
+    /// **Missing functionality**: None - provides complete RTSP streamer construction
+    /// with optional frame processing.
+    ///
     pub fn new(config: RtspConfig, processor: Option<Box<dyn FrameProcessor>>) -> Result<Self> {
         let (publisher, _handle) = start_server(config)?;
         Ok(Self {
@@ -659,6 +705,15 @@ impl RtspStreamer {
     /// * `height` - Frame height in pixels
     /// * `stride` - Bytes per row
     /// * `pts_ns` - Optional presentation timestamp in nanoseconds
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(frame_size + processing_complexity) - Frame copy is O(width × height),
+    /// plus any processing overhead from the optional FrameProcessor.
+    ///
+    /// **Missing functionality**: None - implements complete frame streaming with
+    /// optional processing pipeline.
+    ///
     pub async fn stream_frame(
         &mut self,
         frame_data: &[u8],
@@ -688,6 +743,13 @@ impl RtspStreamer {
     }
 
     /// Get access to the underlying publisher for advanced use cases.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple reference return operation.
+    ///
+    /// **Missing functionality**: None - provides complete access to underlying publisher.
+    ///
     pub fn publisher(&self) -> &RtspPublisher {
         &self.publisher
     }

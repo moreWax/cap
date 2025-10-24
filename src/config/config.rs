@@ -40,7 +40,7 @@
 //! ## Examples
 //!
 //! ```rust
-//! use hybrid_screen_capture::config::CaptureConfig;
+//! use hybrid_screen_capture::config::config::CaptureConfig;
 //!
 //! // Use defaults
 //! let config = CaptureConfig::default();
@@ -51,7 +51,9 @@
 //!     60,  // 60 FPS
 //!     30,  // 30 seconds
 //!     18,  // High quality
-//!     false // Full screen
+//!     false, // Full screen
+//!     None, // No scaling preset
+//!     false  // No Gundam mode
 //! );
 //!
 //! // Validate configuration
@@ -79,7 +81,7 @@
 ///
 /// Basic configuration:
 /// ```rust
-/// use hybrid_screen_capture::config::CaptureConfig;
+/// use hybrid_screen_capture::config::config::CaptureConfig;
 ///
 /// let config = CaptureConfig {
 ///     output: "my_capture.mp4".to_string(),
@@ -87,18 +89,22 @@
 ///     seconds: 10,
 ///     crf: 23,
 ///     window: false,
+///     scale_preset: None,
+///     gundam_mode: false,
 /// };
 /// ```
 ///
 /// High-quality configuration:
 /// ```rust
-/// # use hybrid_screen_capture::config::CaptureConfig;
+/// # use hybrid_screen_capture::config::config::CaptureConfig;
 /// let config = CaptureConfig {
 ///     output: "high_quality.mp4".to_string(),
 ///     fps: 60,
 ///     seconds: 30,
 ///     crf: 18,  // High quality, larger file
 ///     window: true,  // Window capture
+///     scale_preset: None,
+///     gundam_mode: false,
 /// };
 /// ```
 pub struct CaptureConfig {
@@ -167,7 +173,7 @@ impl Default for CaptureConfig {
     /// # Examples
     ///
     /// ```rust
-    /// use hybrid_screen_capture::config::CaptureConfig;
+    /// use hybrid_screen_capture::config::config::CaptureConfig;
     ///
     /// let config = CaptureConfig::default();
     /// assert_eq!(config.output, "capture.mp4");
@@ -189,35 +195,10 @@ impl Default for CaptureConfig {
 impl CaptureConfig {
     /// Creates a new configuration with the specified parameters.
     ///
-    /// This constructor allows you to create a fully customized configuration
-    /// without using the `Default` implementation. All parameters are validated
-    /// when `validate()` is called.
+    /// Time complexity: O(1) - Simple struct field assignment.
     ///
-    /// # Parameters
-    ///
-    /// - `output`: Output file path (e.g., "capture.mp4")
-    /// - `fps`: Target frames per second (must be > 0)
-    /// - `seconds`: Capture duration in seconds (must be > 0)
-    /// - `crf`: Quality factor (must be 18-28)
-    /// - `window`: Window capture mode
-    /// - `scale_preset`: Optional token-efficient scaling preset
-    /// - `gundam_mode`: Enable DeepSeek-OCR Gundam tiling
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use hybrid_screen_capture::config::CaptureConfig;
-    ///
-    /// let config = CaptureConfig::new(
-    ///     "output.mp4".to_string(),
-    ///     60,     // 60 FPS
-    ///     30,     // 30 seconds
-    ///     18,     // High quality
-    ///     false,  // Full screen
-    ///     None,   // No scaling
-    ///     false,  // No Gundam
-    /// );
-    /// ```
+    /// Missing functionality: None - fully implements configuration creation
+    /// with all required parameters.
     pub fn new(
         output: String,
         fps: u32,
@@ -240,39 +221,10 @@ impl CaptureConfig {
 
     /// Validates the configuration parameters.
     ///
-    /// This method checks that all configuration values are within acceptable ranges
-    /// and returns detailed error messages for any invalid parameters.
+    /// Time complexity: O(1) - Performs constant-time range checks on numeric fields.
     ///
-    /// # Validation Rules
-    ///
-    /// - `fps` must be greater than 0
-    /// - `seconds` must be greater than 0
-    /// - `crf` must be between 18 and 28 (inclusive)
-    ///
-    /// # Returns
-    ///
-    /// - `Ok(())` if all parameters are valid
-    /// - `Err(String)` with a descriptive error message if validation fails
-    ///
-    /// # Examples
-    ///
-    /// Valid configuration:
-    /// ```rust
-    /// # use hybrid_screen_capture::config::CaptureConfig;
-    /// let config = CaptureConfig::new(
-    ///     "test.mp4".to_string(), 30, 10, 23, false
-    /// );
-    /// assert!(config.validate().is_ok());
-    /// ```
-    ///
-    /// Invalid configuration:
-    /// ```rust
-    /// # use hybrid_screen_capture::config::CaptureConfig;
-    /// let config = CaptureConfig::new(
-    ///     "test.mp4".to_string(), 0, 10, 23, false // fps = 0 is invalid
-    /// );
-    /// assert!(config.validate().is_err());
-    /// ```
+    /// Missing functionality: None - validates all documented constraints with
+    /// clear error messages.
     pub fn validate(&self) -> Result<(), String> {
         if self.fps == 0 {
             return Err("FPS must be greater than 0".to_string());
@@ -288,43 +240,11 @@ impl CaptureConfig {
 
     /// Convert to CaptureOptions for use with the capture library
     ///
-    /// This method transforms the configuration struct into the format expected
-    /// by the core capture library. It performs a simple field-by-field conversion
-    /// with one important consideration: the `output` field is cloned to transfer
-    /// ownership to the capture library.
+    /// Time complexity: O(output.len()) - Due to string cloning, but typically
+    /// O(1) for reasonable path lengths.
     ///
-    /// # Returns
-    ///
-    /// A `CaptureOptions` struct ready to be passed to `capture_screen()`.
-    ///
-    /// # Performance Notes
-    ///
-    /// This method clones the output string. For performance-critical code paths,
-    /// consider using the configuration directly where possible.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use hybrid_screen_capture::config::CaptureConfig;
-    ///
-    /// let config = CaptureConfig::default();
-    /// let options = config.to_capture_options();
-    ///
-    /// // Now you can use options with the capture library
-    /// // capture_screen(options).await?;
-    /// ```
-    ///
-    /// Using with validation:
-    /// ```rust
-    /// # use hybrid_screen_capture::config::CaptureConfig;
-    /// let config = CaptureConfig::new(
-    ///     "output.mp4".to_string(), 60, 30, 18, false
-    /// );
-    ///
-    /// config.validate()?;  // Validate before conversion
-    /// let options = config.to_capture_options();
-    /// # Ok::<(), String>(())
-    /// ```
+    /// Missing functionality: None - performs complete field mapping to the
+    /// library's expected format.
     pub fn to_capture_options(&self) -> crate::CaptureOptions {
         crate::CaptureOptions {
             output: self.output.clone(),

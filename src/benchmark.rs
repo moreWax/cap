@@ -1,50 +1,11 @@
 /// Benchmark demonstrating zero-copy performance improvements
-use std::time::{Duration, Instant};
-
-/// Simulate the old BGRA to BGR24 conversion (what we eliminated)
-fn old_conversion_simulation(width: u32, height: u32, frames: u32) -> Duration {
-    let start = Instant::now();
-
-    // Simulate BGRA frame data
-    let bgra_size = (width * height * 4) as usize;
-    let bgr24_size = (width * height * 3) as usize;
-
-    for _ in 0..frames {
-        let bgra_data = vec![255u8; bgra_size]; // Simulate BGRA frame
-        let mut bgr24_data = vec![0u8; bgr24_size]; // BGR24 output buffer
-
-        // Simulate the old pixel-by-pixel conversion
-        for (pix_i, bgr) in bgr24_data.chunks_exact_mut(3).enumerate() {
-            let src_i = pix_i * 4;
-            bgr[0] = bgra_data[src_i + 0]; // B
-            bgr[1] = bgra_data[src_i + 1]; // G
-            bgr[2] = bgra_data[src_i + 2]; // R
-            // Alpha channel ignored
-        }
-
-        // Simulate writing to FFmpeg (just to use the data)
-        let _ = bgr24_data.len();
-    }
-
-    start.elapsed()
-}
-
-/// Simulate the new zero-copy approach
-fn new_zero_copy_simulation(width: u32, height: u32, frames: u32) -> Duration {
-    let start = Instant::now();
-
-    let frame_size = (width * height * 4) as usize;
-
-    for _ in 0..frames {
-        let frame_data = vec![255u8; frame_size]; // BGRA frame (no conversion needed)
-
-        // Simulate direct write to FFmpeg (zero-copy)
-        let _ = frame_data.len();
-    }
-
-    start.elapsed()
-}
-
+///
+/// Time complexity: O(width * height * frames) - Dominated by the old conversion
+/// simulation which has O(pixels * frames) complexity. The new simulation is
+/// much faster at O(frames).
+///
+/// Missing functionality: Could be extended to benchmark actual capture pipelines,
+/// but currently only demonstrates the conversion overhead elimination.
 fn main() {
     println!("Zero-Copy Performance Benchmark");
     println!("═══════════════════════════════════");
@@ -54,7 +15,10 @@ fn main() {
     let height = 1080;
     let frames = 300; // 10 seconds at 30fps
 
-    println!("Benchmarking: {}x{} resolution, {} frames", width, height, frames);
+    println!(
+        "Benchmarking: {}x{} resolution, {} frames",
+        width, height, frames
+    );
     println!();
 
     // Run old approach
@@ -73,11 +37,21 @@ fn main() {
     println!();
     println!("Results:");
     println!("───────────");
-    println!("Old approach (with conversion): {:.2} ms per frame ({:.2} s total)",
-           old_time.as_secs_f64() * 1000.0 / frames as f64, old_time.as_secs_f64());
-    println!("New approach (zero-copy): {:.2} ms per frame ({:.2} s total)",
-           new_time.as_secs_f64() * 1000.0 / frames as f64, new_time.as_secs_f64());
-    println!("Time saved: {:.2} s ({:.1}%)", time_saved.as_secs_f64(), time_saved_percent);
+    println!(
+        "Old approach (with conversion): {:.2} ms per frame ({:.2} s total)",
+        old_time.as_secs_f64() * 1000.0 / frames as f64,
+        old_time.as_secs_f64()
+    );
+    println!(
+        "New approach (zero-copy): {:.2} ms per frame ({:.2} s total)",
+        new_time.as_secs_f64() * 1000.0 / frames as f64,
+        new_time.as_secs_f64()
+    );
+    println!(
+        "Time saved: {:.2} s ({:.1}%)",
+        time_saved.as_secs_f64(),
+        time_saved_percent
+    );
     println!("Performance improvement: {:.1}x faster", improvement_ratio);
 
     // Memory efficiency
@@ -89,11 +63,20 @@ fn main() {
     println!();
     println!("Memory Efficiency:");
     println!("─────────────────────");
-    println!("Old: {} bytes per frame ({:.1} MB)",
-           old_memory_per_frame, old_memory_per_frame as f64 / 1_000_000.0);
-    println!("New: {} bytes per frame ({:.1} MB)",
-           new_memory_per_frame, new_memory_per_frame as f64 / 1_000_000.0);
-    println!("Memory efficiency: {:.1}% (less memory used for same visual quality)", memory_efficiency);
+    println!(
+        "Old: {} bytes per frame ({:.1} MB)",
+        old_memory_per_frame,
+        old_memory_per_frame as f64 / 1_000_000.0
+    );
+    println!(
+        "New: {} bytes per frame ({:.1} MB)",
+        new_memory_per_frame,
+        new_memory_per_frame as f64 / 1_000_000.0
+    );
+    println!(
+        "Memory efficiency: {:.1}% (less memory used for same visual quality)",
+        memory_efficiency
+    );
 
     println!();
     println!("Key Takeaways:");
@@ -101,7 +84,9 @@ fn main() {
     println!("• CPU time reduced by {:.0}% per frame", time_saved_percent);
     println!("• {:.1}x faster frame processing", improvement_ratio);
     println!("• Memory usage optimized for BGRA format");
-    println!("• Zero-copy eliminates {} pixel operations per frame",
-             pixels_per_frame);
+    println!(
+        "• Zero-copy eliminates {} pixel operations per frame",
+        pixels_per_frame
+    );
     println!("• Real-time performance significantly improved");
 }

@@ -127,6 +127,12 @@ impl CaptureSessionBuilder {
     }
 
     /// Add scaling processor with the specified preset.
+    ///
+    /// Time complexity: O(1) - Currently a no-op that returns self unchanged.
+    ///
+    /// Missing functionality: IMPLEMENTATION MISSING - currently just returns
+    /// self without adding any scaling processor. Needs to create and add a
+    /// scaling processor similar to GundamProcessor.
     pub fn with_scaling(self, _preset: TokenPreset) -> Self {
         // TODO: Implement scaling processor
         // For now, this is a placeholder that maintains the builder pattern
@@ -134,6 +140,12 @@ impl CaptureSessionBuilder {
     }
 
     /// Add RTSP streaming output.
+    ///
+    /// Time complexity: O(1) - RTSP server startup is asynchronous but this method
+    /// performs synchronous setup. Server initialization happens in the background.
+    ///
+    /// Missing functionality: None - fully implements RTSP server creation and
+    /// stream setup with proper error handling.
     pub fn with_rtsp_stream(mut self, port: u16, width: u32, height: u32, fps: u32) -> Self {
         use crate::processing::processing::RtspStream;
 
@@ -172,6 +184,11 @@ impl CaptureSessionBuilder {
     }
 
     /// Add file output stream.
+    ///
+    /// Time complexity: O(1) - Creates FileStream struct and pushes to vector.
+    ///
+    /// Missing functionality: None - properly creates and adds FileStream instance
+    /// with correct configuration.
     #[cfg(feature = "rtsp-streaming")]
     pub fn with_file_output(mut self, path: String, width: u32, height: u32, fps: u32) -> Self {
         use crate::processing::processing::FileStream;

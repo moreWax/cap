@@ -106,6 +106,13 @@ pub struct Rect {
 ///
 /// # Returns
 /// (columns, rows) tuple for tile grid
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple arithmetic operations and clamping.
+///
+/// **Missing functionality**: None - provides complete grid dimension calculation.
+///
 pub fn choose_grid(in_w: u32, in_h: u32) -> (u32, u32) {
     let mut cols = (f64::from(in_w) / 1024.0).ceil() as u32;
     let mut rows = (f64::from(in_h) / 1024.0).ceil() as u32;
@@ -224,6 +231,17 @@ pub struct GundamOutputs<'a> {
 /// # Future Optimizations
 /// TODO: Consider parallel tile processing for very large inputs.
 /// TODO: Add tile content analysis to prioritize high-information tiles.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(num_tiles × tile_size² + global_size²) - Processes each tile
+/// individually with scaling operations, plus a global view scaling. For typical Gundam
+/// configuration (4 tiles × 640×640 + 1024×1024 global), this represents
+/// O(4 × 0.4M + 1M) = O(2.6M) operations per frame.
+///
+/// **Missing functionality**: None - fully implements Gundam tile extraction and scaling
+/// with configurable overlap and grid layouts.
+///
 pub fn gundam_pack_cpu(
     resizer: &mut Resizer,
     src_bgra: &[u8],

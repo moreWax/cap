@@ -55,14 +55,6 @@ path = "tools/bin/check_deps.rs"
 name = "benchmark"
 path = "tools/bin/benchmark.rs"
 
-[[bin]]
-name = "test_qwen_vl"
-path = "tests/test_qwen_vl.rs"
-
-[[bin]]
-name = "test_token_savings"
-path = "tests/test_token_savings.rs"
-
 [features]
 # Screen capture functionality. Enabled by default but disabled for WASM.
 default = ["screen-capture", "wayland-pipe"]

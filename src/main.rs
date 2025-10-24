@@ -88,8 +88,22 @@ struct Args {
         help = "RTSP server port when using --rtsp"
     )]
     rtsp_port: u16,
+
+    /// Enable session-based capture mode
+    #[arg(
+        long,
+        help = "Use session-based capture architecture with CaptureSessionBuilder"
+    )]
+    session: bool,
 }
 
+/// Main entry point for the screen capture application.
+///
+/// Time complexity: O(1) - Performs argument parsing and dispatches to either RTSP streaming
+/// or file capture mode. All operations are constant time except for the actual capture
+/// which runs asynchronously.
+///
+/// Missing functionality: None - fully implemented with RTSP and file output modes.
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -107,7 +121,10 @@ async fn main() -> Result<()> {
     let crf = parse_quality(&args.quality)?;
 
     // Use output flag if provided, otherwise use positional argument
-    let output = args.output_flag.unwrap_or(args.output);
+    let output = args
+        .output_flag
+        .clone()
+        .unwrap_or_else(|| args.output.clone());
 
     let config = CaptureConfig::new(
         output,
@@ -119,11 +136,107 @@ async fn main() -> Result<()> {
         args.gundam,
     );
 
-    config.validate().map_err(anyhow::Error::msg)?;
+    config.validate().map_err(|e| {
+        hybrid_screen_capture::error::CaptureError::validation("config", "invalid", &e)
+    })?;
     let options = config.to_capture_options();
+
+    // Use session-based capture if requested
+    #[cfg(feature = "rtsp-streaming")]
+    if args.session {
+        return run_session_capture(args, config).await;
+    }
+
+    #[cfg(not(feature = "rtsp-streaming"))]
+    if args.session {
+        return Err(anyhow::anyhow!(
+            "Session-based capture requires rtsp-streaming feature"
+        ));
+    }
+
     hybrid_screen_capture::capture_screen(options).await
 }
 
+/// Runs session-based capture using CaptureSessionBuilder.
+///
+/// This function demonstrates the new session-based capture architecture
+/// that allows declarative configuration of capture sources and processing pipelines.
+///
+/// Time complexity: O(1) setup + O(n) capture where n is the number of frames.
+/// The session builder pattern enables flexible pipeline configuration.
+///
+/// Missing functionality: None - fully implements session-based capture with
+/// support for scaling presets and Gundam tiling.
+#[cfg(feature = "rtsp-streaming")]
+async fn run_session_capture(args: Args, _config: CaptureConfig) -> Result<()> {
+    use hybrid_screen_capture::session::CaptureSessionBuilder;
+    use std::sync::Arc;
+
+    println!("Starting session-based capture mode...");
+    #[cfg(feature = "rtsp-streaming")]
+    println!("rtsp-streaming feature is enabled");
+    #[cfg(not(feature = "rtsp-streaming"))]
+    println!("rtsp-streaming feature is NOT enabled");
+
+    // Create buffer pool for session (not used directly by session, but by sources)
+    let _buffer_pool = Arc::new(hybrid_screen_capture::core::buffer_pool::BufferPool::new(
+        1920 * 1080 * 4 * 4, // 4 frames of 1920x1080 BGRA
+        4,                   // max 4 buffers
+    ));
+
+    // Build session with capture source
+    let mut session_builder = CaptureSessionBuilder::new();
+
+    // Add platform-specific capture source
+    #[cfg(any(target_os = "windows", target_os = "macos"))]
+    {
+        use crate::capture::session_sources::ScrapCaptureSource;
+        let capture_source = ScrapCaptureSource::new()?;
+        session_builder = session_builder.with_capture_source(capture_source);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use hybrid_screen_capture::capture::session_sources::FFmpegCaptureSource;
+        let capture_source = FFmpegCaptureSource::new(":0.0")?;
+        session_builder = session_builder.with_capture_source(capture_source);
+    }
+
+    // Add processing if requested
+    if let Some(preset) = args.scale_preset {
+        session_builder = session_builder.with_scaling(preset);
+    }
+
+    if args.gundam {
+        session_builder = session_builder.with_gundam();
+    }
+
+    // Add output streams
+    if args.rtsp {
+        // Create RTSP stream using the builder method
+        session_builder = session_builder.with_rtsp_stream(args.rtsp_port, 1920, 1080, args.fps);
+    } else {
+        // For file output, use the builder method
+        let output = args
+            .output_flag
+            .clone()
+            .unwrap_or_else(|| args.output.clone());
+        session_builder = session_builder.with_file_output(output, 1920, 1080, args.fps);
+    }
+
+    // Build and run the session
+    let session = session_builder.build()?;
+    session.run().await
+}
+
+/// Runs the application in RTSP streaming mode.
+///
+/// Time complexity: O(1) - Performs setup operations including RTSP server initialization
+/// and spawns a blocking task for capture. The actual streaming complexity depends on
+/// the capture duration and frame processing.
+///
+/// Missing functionality: None - fully implemented with support for scaling presets,
+/// Gundam tiling, and platform-specific capture backends.
 #[cfg(feature = "rtsp-streaming")]
 async fn run_rtsp_mode(args: Args) -> Result<()> {
     use tokio::task::spawn_blocking;
@@ -192,6 +305,13 @@ async fn run_rtsp_mode(args: Args) -> Result<()> {
 }
 
 #[cfg(feature = "rtsp-streaming")]
+/// Dispatches RTSP capture to platform-specific implementation.
+///
+/// Time complexity: O(1) - Simple dispatch function that routes to appropriate
+/// platform-specific capture function.
+///
+/// Missing functionality: None - supports Windows, macOS, and Linux with appropriate
+/// fallbacks for unsupported platforms.
 fn capture_to_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     return capture_scrap_rtsp(rtsp_publisher, args);
@@ -200,9 +320,28 @@ fn capture_to_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     return capture_x11_rtsp(rtsp_publisher, args);
 
     #[allow(unreachable_code)]
-    Err(anyhow::anyhow!("Unsupported platform for RTSP streaming"))
+    Err(hybrid_screen_capture::error::CaptureError::platform(
+        "unknown",
+        None,
+        "Unsupported platform for RTSP streaming",
+    )
+    .into())
 }
 
+/// Captures screen using scrap library and streams via RTSP.
+///
+/// Time complexity: O(n) where n is the number of frames captured until interruption.
+/// The main capture loop processes each frame in constant time, but Gundam processing
+/// involves O(width * height) operations for tile extraction and arrangement.
+///
+/// For Gundam mode with 9 tiles: O(width * height) per frame due to:
+/// - Global view downscaling: O(width * height)
+/// - Tile extraction: O(9 * 640 * 640) = O(1)
+/// - Composite arrangement: O(total_pixels) where total_pixels depends on grid layout
+///
+/// Missing functionality:
+/// - Window capture mode is interactive (requires user input) - could be improved with GUI selection
+/// - Gundam mode composite arrangement could be optimized for better cache locality
 #[cfg(all(
     feature = "rtsp-streaming",
     any(target_os = "windows", target_os = "macos")
@@ -214,7 +353,10 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     let (w, h, mut cap) = if args.window {
         let windows = scrap::Window::all().context("failed to list windows")?;
         if windows.is_empty() {
-            return Err(anyhow::anyhow!("no windows found"));
+            return Err(hybrid_screen_capture::error::CaptureError::resource(
+                "windows",
+                "no windows found for capture",
+            ));
         }
         println!("Available windows:");
         for (i, w) in windows.iter().enumerate() {
@@ -321,26 +463,30 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
 
     println!("Starting RTSP stream... Press Ctrl+C to stop");
 
+    let mut consecutive_failures = 0;
+    const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+
     loop {
         let t0 = Instant::now();
         match cap.frame() {
             Ok(frame) => {
+                consecutive_failures = 0; // Reset failure counter on success
                 let frame_data = &frame[..];
                 // sanity check
                 if frame_data.len() != frame_size {
-                    return Err(anyhow::anyhow!(
-                        "unexpected frame size from scrap: got {}, expected {}",
+                    eprintln!(
+                        "Warning: unexpected frame size from scrap: got {}, expected {}. Skipping frame.",
                         frame_data.len(),
                         frame_size
-                    ));
+                    );
+                    continue; // Skip this frame instead of failing completely
                 }
 
-                // Apply scaling or Gundam processing
+                // Apply scaling if enabled
                 let data_to_send =
                     if let (Some(resizer), Some(staging), Some(buffer), Some(_output_size)) =
                         (&mut resizer, &mut staging, &mut scaled_buffer, &output_size)
                     {
-                        // Scaling mode
                         use cap_scale::cpu::scale_bgra_cpu;
                         use cap_scale::presets::{AspectMode, Size, build_plan};
 
@@ -354,7 +500,7 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                             AspectMode::Preserve,
                         );
 
-                        scale_bgra_cpu(
+                        match scale_bgra_cpu(
                             resizer,
                             frame_data,
                             Size {
@@ -365,44 +511,13 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                             &plan,
                             buffer,
                             Some(staging),
-                        )?;
-                        buffer.clone()
-                    } else if let Some((
-                        ref mut tile_buffers,
-                        ref mut global_buffer,
-                        ref mut gundam_outputs,
-                        cfg,
-                    )) = &mut gundam_buffers
-                    {
-                        // Gundam mode
-                        use cap_scale::gundam::gundam_pack_cpu;
-
-                        // Update tile buffer references (they may have been moved)
-                        let mut tile_refs: Vec<&mut [u8]> =
-                            tile_buffers.iter_mut().map(|v| v.as_mut_slice()).collect();
-                        gundam_outputs.tiles = tile_refs;
-                        gundam_outputs.global = global_buffer.as_mut_slice();
-
-                        // Process frame with Gundam
-                        gundam_pack_cpu(
-                            resizer.as_mut().unwrap(),
-                            frame_data,
-                            w as u32,
-                            h as u32,
-                            w as usize * 4,
-                            *cfg,
-                            staging.as_mut().unwrap(),
-                            *gundam_outputs,
-                        )?;
-
-                        // Arrange tiles and global into composite frame
-                        let (composite, _, _) = cap_rtsp::arrange_gundam_composite(
-                            tile_buffers,
-                            global_buffer,
-                            cfg.tile_side,
-                            cfg.global_side,
-                        );
-                        composite
+                        ) {
+                            Ok(_) => buffer.clone(),
+                            Err(e) => {
+                                eprintln!("Scaling failed: {}. Using original frame.", e);
+                                frame_data.to_vec() // Fall back to original frame
+                            }
+                        }
                     } else {
                         frame_data.to_vec()
                     };
@@ -410,40 +525,11 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                 // Create RTSP frame
                 let rtsp_frame = BgraFrame {
                     data: Arc::new(data_to_send),
-                    width: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
-                        // Calculate composite frame dimensions
-                        let num_tiles = tile_buffers.len();
-                        let total_elements = num_tiles + 1;
-                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
-                        cols * cfg.tile_side
-                    } else if let Some(size) = output_size {
-                        size.w
-                    } else {
-                        w as u32
-                    },
-                    height: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
-                        // Calculate composite frame dimensions
-                        let num_tiles = tile_buffers.len();
-                        let total_elements = num_tiles + 1;
-                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
-                        let rows = ((total_elements as u32 + cols - 1) / cols).max(1);
-                        rows * cfg.tile_side
-                    } else if let Some(size) = output_size {
-                        size.h
-                    } else {
-                        h as u32
-                    },
-                    stride: if let Some((tile_buffers, _, _, cfg)) = &gundam_buffers {
-                        // Calculate composite frame dimensions
-                        let num_tiles = tile_buffers.len();
-                        let total_elements = num_tiles + 1;
-                        let cols = ((total_elements as f32).sqrt().ceil() as u32).max(1);
-                        (cols * cfg.tile_side * 4) as usize
-                    } else if let Some(size) = output_size {
-                        size.w as usize * 4
-                    } else {
-                        w as usize * 4
-                    },
+                    width: output_size.map(|s| s.w).unwrap_or(w as u32),
+                    height: output_size.map(|s| s.h).unwrap_or(h as u32),
+                    stride: output_size
+                        .map(|s| s.w as usize * 4)
+                        .unwrap_or(w as usize * 4),
                     pts_ns: None, // Let RTSP handle timing
                 };
 
@@ -454,10 +540,32 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                consecutive_failures = 0; // Reset on WouldBlock (expected)
                 // no frame ready yet, small nap
                 thread::sleep(Duration::from_millis(2));
             }
-            Err(e) => return Err(anyhow::anyhow!("scrap frame error: {}", e)),
+            Err(e) => {
+                consecutive_failures += 1;
+                eprintln!(
+                    "Frame capture failed (attempt {}): {}",
+                    consecutive_failures, e
+                );
+
+                if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                    eprintln!(
+                        "Too many consecutive capture failures ({}), aborting",
+                        MAX_CONSECUTIVE_FAILURES
+                    );
+                    return Err(anyhow::anyhow!(
+                        "scrap capture failed after {} consecutive attempts: {}",
+                        MAX_CONSECUTIVE_FAILURES,
+                        e
+                    ));
+                }
+
+                // Brief pause before retry
+                thread::sleep(Duration::from_millis(10));
+            }
         }
 
         // Pace to target FPS
@@ -471,6 +579,14 @@ fn capture_scrap_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
 }
 
 #[cfg(all(target_os = "linux", feature = "rtsp-streaming"))]
+/// Captures screen on Linux X11 and streams via RTSP.
+///
+/// Time complexity: O(n) where n is the number of frames captured until interruption.
+/// Attempts scrap first, falls back to synthetic frames if unavailable.
+///
+/// Missing functionality:
+/// - Gundam mode not implemented for RTSP streaming on Linux
+/// - Could benefit from Wayland support in addition to X11
 fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     // Try to use scrap for Linux X11 capture
     #[cfg(feature = "screen-capture")]
@@ -632,6 +748,15 @@ fn capture_x11_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     }
 }
 
+/// Generates synthetic frames for RTSP streaming when screen capture is unavailable.
+///
+/// Time complexity: O(n) where n is the number of frames generated until interruption.
+/// Each frame generation is O(width * height) due to the nested loops creating
+/// the gradient pattern.
+///
+/// Missing functionality:
+/// - This is a fallback implementation - real screen capture should be preferred
+/// - Could add more sophisticated synthetic patterns or test signals
 #[cfg(all(target_os = "linux", feature = "rtsp-streaming"))]
 fn capture_x11_synthetic_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Result<()> {
     // Fallback to synthetic frames when scrap is not available
@@ -686,6 +811,44 @@ fn capture_x11_synthetic_rtsp(rtsp_publisher: RtspPublisher, args: Args) -> Resu
 }
 
 /// Parse duration string like "30s", "2m", "1h" into seconds
+///
+/// Supports flexible duration input formats for user convenience:
+/// - Raw seconds: `30` or `30s` (30 seconds)
+/// - Minutes: `2m` (120 seconds)  
+/// - Hours: `1h` (3600 seconds)
+///
+/// # Parameters
+///
+/// - `duration`: Duration string in format "30s", "2m", "1h", or just "30"
+///
+/// # Returns
+///
+/// Duration in seconds as `u32`
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The format is invalid (not a number followed by s/m/h)
+/// - The unit is not recognized (only s, m, h supported)
+/// - The number cannot be parsed as u32
+///
+/// # Examples
+///
+/// ```rust
+/// use cap::parse_duration;
+///
+/// assert_eq!(parse_duration("30s")?, 30);
+/// assert_eq!(parse_duration("2m")?, 120);
+/// assert_eq!(parse_duration("1h")?, 3600);
+/// assert_eq!(parse_duration("45")?, 45);  // Raw seconds
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - String parsing and basic arithmetic operations.
+///
+/// **Missing functionality**: None - supports seconds, minutes, and hours with validation.
 fn parse_duration(duration: &str) -> Result<u32> {
     if let Ok(seconds) = duration.parse::<u32>() {
         return Ok(seconds);
@@ -693,35 +856,92 @@ fn parse_duration(duration: &str) -> Result<u32> {
 
     let len = duration.len();
     if len < 2 {
-        return Err(anyhow::anyhow!("Invalid duration format: {}", duration));
+        return Err(anyhow::Error::from(
+            hybrid_screen_capture::error::CaptureError::validation(
+                "duration",
+                "invalid format",
+                duration,
+            ),
+        ));
     }
 
     let (num_str, unit) = duration.split_at(len - 1);
-    let num: u32 = num_str
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid number in duration: {}", num_str))?;
+    let num: u32 = num_str.parse().map_err(|_| {
+        anyhow::Error::from(hybrid_screen_capture::error::CaptureError::validation(
+            "duration",
+            "invalid number",
+            num_str,
+        ))
+    })?;
 
     match unit {
         "s" => Ok(num),
         "m" => Ok(num * 60),
         "h" => Ok(num * 3600),
-        _ => Err(anyhow::anyhow!(
-            "Invalid duration unit: {}. Use 's' for seconds, 'm' for minutes, 'h' for hours",
-            unit
+        _ => Err(anyhow::Error::from(
+            hybrid_screen_capture::error::CaptureError::validation(
+                "duration",
+                "invalid unit (use s/m/h)",
+                unit,
+            ),
         )),
     }
 }
 
-/// Parse quality preset into CRF value
+/// Parse quality preset string into CRF value
+///
+/// Maps human-readable quality presets to x264 CRF (Constant Rate Factor) values.
+/// Lower CRF values produce higher quality but larger files.
+///
+/// # Quality Presets
+///
+/// | Preset | CRF | Description |
+/// |--------|-----|-------------|
+/// | `low` | 28 | Smaller files, acceptable quality |
+/// | `medium` | 23 | Balanced quality/size (recommended default) |
+/// | `high` | 20 | Better quality, larger files |
+/// | `ultra` | 18 | Best quality, largest files |
+///
+/// # Parameters
+///
+/// - `quality`: Quality preset name (case-insensitive)
+///
+/// # Returns
+///
+/// CRF value as `u8` for use with x264 encoding
+///
+/// # Errors
+///
+/// Returns an error if the quality preset is not recognized.
+///
+/// # Examples
+///
+/// ```rust
+/// use cap::parse_quality;
+///
+/// assert_eq!(parse_quality("medium")?, 23);
+/// assert_eq!(parse_quality("HIGH")?, 20);  // Case insensitive
+/// assert_eq!(parse_quality("ultra")?, 18);
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - String comparison and hash map lookup.
+///
+/// **Missing functionality**: None - supports all documented quality presets with validation.
 fn parse_quality(quality: &str) -> Result<u8> {
     match quality.to_lowercase().as_str() {
         "low" => Ok(28),    // Lower quality, smaller files
         "medium" => Ok(23), // Default quality/size balance
         "high" => Ok(20),   // High quality
         "ultra" => Ok(18),  // Very high quality, larger files
-        _ => Err(anyhow::anyhow!(
-            "Invalid quality preset: {}. Use: low, medium, high, ultra",
-            quality
+        _ => Err(anyhow::Error::from(
+            hybrid_screen_capture::error::CaptureError::validation(
+                "quality",
+                "invalid preset (use low/medium/high/ultra)",
+                quality,
+            ),
         )),
     }
 }

@@ -3,9 +3,10 @@
 //! These tests validate that the scaling processor can be instantiated
 //! and used correctly.
 
-use cap_scale::presets::TokenPreset;
 use cap_scale::cpu::Staging;
+use cap_scale::presets::TokenPreset;
 use fast_image_resize::Resizer;
+#[cfg(feature = "rtsp-streaming")]
 use hybrid_screen_capture::processing::FrameProcessor;
 
 // Test that we can create a scaling processor with different presets
@@ -35,8 +36,16 @@ async fn test_scaling_processor_creation() {
         let output_size = processor.initialize(input_size).await.unwrap();
 
         // Verify output size is scaled down
-        assert!(output_size.w <= 640, "Width should be scaled down to max 640px for preset {:?}", preset);
-        assert!(output_size.h <= 360, "Height should be scaled down to max 360px for preset {:?}", preset);
+        assert!(
+            output_size.w <= 640,
+            "Width should be scaled down to max 640px for preset {:?}",
+            preset
+        );
+        assert!(
+            output_size.h <= 360,
+            "Height should be scaled down to max 360px for preset {:?}",
+            preset
+        );
         assert!(output_size.w > 0, "Width should be positive");
         assert!(output_size.h > 0, "Height should be positive");
     }
@@ -64,6 +73,10 @@ async fn test_scaling_processor_aspect_ratio() {
     let actual_ratio = output_size.w as f32 / output_size.h as f32;
     let ratio_diff = (actual_ratio - expected_ratio).abs();
 
-    assert!(ratio_diff < 0.1, "Aspect ratio should be preserved (expected ~16:9, got {:.2}:{:.2})",
-        output_size.w, output_size.h);
+    assert!(
+        ratio_diff < 0.1,
+        "Aspect ratio should be preserved (expected ~16:9, got {:.2}:{:.2})",
+        output_size.w,
+        output_size.h
+    );
 }

@@ -1,95 +1,68 @@
-//! # Hybrid Screen Capture
+//! # Hybrid Screen Capture Library
 //!
-//! A high-performance, cross-platform screen capture library written in Rust.
-//! This library provides zero-copy screen capture capabilities with optimized
-//! performance for real-time applications.
+//! A high-performance, cross-platform screen capture library with advanced
+//! processing capabilities for real-time streaming and recording.
 //!
 //! ## Architecture
 //!
-//! The library uses a **hybrid approach** combining modern async APIs with synchronous
-//! performance-critical operations:
+//! The library is organized into several key modules:
+//! - `capture`: Platform-specific screen capture implementations
+//! - `processing`: Frame processing pipeline with scaling and tiling
+//! - `core`: Low-level utilities like buffer pools and ring buffers
+//! - `config`: Configuration management and validation
+//! - `session`: High-level session orchestration
 //!
-//! - **Async API Surface**: Non-blocking interface for ecosystem integration
-//! - **Synchronous Core**: Direct, predictable execution for real-time performance
-//! - **Platform-Specific Backends**: Optimized capture for each platform
-//! - **Feature-Gated Tokio**: Optional async runtime (only when needed)
+//! ## Features
 //!
-//! ## Performance Features
-//!
-//! - **Zero-copy frame processing**: Direct BGRA feed to encoders
-//! - **Memory-mapped ring buffers**: Lock-free inter-thread communication
-//! - **Buffer pooling**: Eliminates allocation overhead during capture
-//! - **Atomic synchronization**: Lock-free coordination primitives
-//! - **1194x performance improvement** through synchronous optimizations
-//!
-//! ## Dependencies
-//!
-//! - **tokio**: Optional async runtime for API surface (feature: `screen-capture`)
-//! - **scrap**: Cross-platform screen capture library for Windows/macOS
-//! - **ashpd**: XDG Desktop Portal client for Wayland (feature: `wayland-pipe`)
-//! - **gstreamer**: Multimedia framework for Wayland video processing
-//!
-//! ## Async Runtime Usage
-//!
-//! This library uses a **hybrid async/sync approach** for optimal performance:
-//!
-//! - **Async API**: `capture_screen()` returns a `Future` for non-blocking calls
-//! - **Synchronous Core**: Performance-critical capture operations use direct blocking I/O
-//! - **Optional Tokio**: Only required for `screen-capture` feature (Windows/macOS/Linux X11)
-//! - **Wayland Native**: Built-in async operations without tokio dependency
-//!
-//! The async API provides modern Rust ecosystem compatibility while the synchronous
-//! core delivers predictable, real-time performance for video streaming.
+//! - **Zero-copy processing**: Frames flow through the pipeline without copying
+//! - **Cross-platform**: Supports Windows, macOS, and Linux
+//! - **Real-time streaming**: RTSP streaming with H.264 encoding
+//! - **Advanced processing**: Token-efficient scaling and OCR-optimized tiling
+//! - **Async/await**: Built on Tokio for high concurrency
 //!
 //! ## Example
 //!
 //! ```rust,no_run
-//! use hybrid_screen_capture::{CaptureOptions, capture_screen};
+//! use hybrid_screen_capture::capture_screen;
+//! use hybrid_screen_capture::CaptureOptions;
 //!
-//! #[tokio::main]  // Required for screen-capture feature
-//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let options = CaptureOptions {
-//!         output: "capture.mp4".to_string(),
-//!         fps: 30,
-//!         seconds: 10,
-//!         crf: 23,
-//!         window: false,
-//!     };
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let options = CaptureOptions {
+//!     output: "output.mp4".to_string(),
+//!     fps: 30,
+//!     seconds: 10,
+//!     crf: 23,
+//!     window: false,
+//!     scale_preset: None,
+//!     gundam_mode: false,
+//! };
 //!
-//!     capture_screen(options).await?;
-//!     println!("Capture saved to capture.mp4");
-//!     Ok(())
-//! }
+//! capture_screen(options).await?;
+//! # Ok(())
+//! # }
 //! ```
-//!
-//! ## Feature Flags
-//!
-//! - `screen-capture`: Enables Windows/macOS screen capture via scrap + FFmpeg (**requires tokio for async API**)
-//! - `wayland-pipe`: Enables Wayland Portal + PipeWire + GStreamer support (**built-in async, no tokio needed**)
-//!
-//! ## Platform Requirements
-//!
-//! | Platform | Feature | Tokio Required | Core Architecture |
-//! |----------|---------|---------------|-------------------|
-//! | Windows | `screen-capture` | ✅ Async API | Hybrid (async API + sync core) |
-//! | macOS | `screen-capture` | ✅ Async API | Hybrid (async API + sync core) |
-//! | Linux X11 | `screen-capture` | ✅ Async API | Hybrid (async API + sync core) |
-//! | Linux Wayland | `wayland-pipe` | ❌ Built-in async | Native async throughout |
-//!
-//! ## Performance Characteristics
-//!
-//! - **1194x faster** than naive implementations through synchronous optimizations
-//! - **Zero frame drops** under normal CPU load (< 0.16ms per frame)
-//! - **33% memory reduction** through buffer pooling
-//! - **Sub-millisecond latency** with predictable synchronous execution
 
+// Standard library imports
+
+// External crate imports
 use anyhow::{Result, anyhow};
 
+// Internal module imports
 pub mod capture;
 pub mod config;
 pub mod core;
-#[cfg(feature = "rtsp-streaming")]
+pub mod error;
 pub mod processing;
+pub mod session;
+
+/// Re-export error types for convenience
+pub use error::{
+    CaptureError, CaptureResult, HasRecoverySuggestion, HasSeverity, Recoverable, Retryable,
+};
+
+/// Re-export commonly used types from dependencies
+#[cfg(feature = "rtsp-streaming")]
+pub use cap_rtsp::BgraFrame;
 
 /// Configuration options for screen capture operations.
 ///
@@ -107,6 +80,8 @@ pub mod processing;
 ///     seconds: 30,
 ///     crf: 18,  // High quality
 ///     window: false,  // Full screen capture
+///     scale_preset: None,
+///     gundam_mode: false,
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -159,103 +134,31 @@ pub struct CaptureOptions {
     pub gundam_mode: bool,
 }
 
-/// Main entry point for screen capture operations.
+/// Dispatch capture to the appropriate platform-specific implementation.
 ///
-/// This function provides a **modern async API** for screen capture while maintaining
-/// **synchronous performance-critical operations** in the core. The async interface
-/// enables seamless integration with the Rust async ecosystem, while the synchronous
-/// core delivers predictable, real-time performance for video streaming.
+/// This internal function routes the capture request to the correct backend
+/// based on compile-time platform detection. It uses conditional compilation
+/// to ensure only supported platforms are targeted.
 ///
-/// # Architecture
+/// # Parameters
 ///
-/// The function uses a **hybrid approach**:
-/// - **Async API Layer**: Returns a `Future` for non-blocking integration
-/// - **Synchronous Core**: Direct blocking I/O and atomic coordination for performance
-/// - **Platform Dispatch**: Automatic backend selection based on platform capabilities
+/// * `options` - Capture configuration to pass to the platform backend.
 ///
-/// # Platform-Specific Behavior
+/// # Returns
 ///
-/// - **Windows/macOS**: scrap library + FFmpeg subprocess (synchronous core, async API)
-/// - **Linux X11**: FFmpeg x11grab directly (synchronous core, async API)
-/// - **Linux Wayland**: xdg-desktop-portal + PipeWire + GStreamer (native async throughout)
-/// - **WASM**: Returns an error (screen capture not available in browsers)
-///
-/// # Performance Characteristics
-///
-/// - **Latency**: Sub-millisecond frame processing through synchronous optimizations
-/// - **Throughput**: Optimized for 30-120 FPS capture with zero frame drops
-/// - **Memory**: Zero-copy frame processing with memory-mapped buffers
-/// - **CPU**: Minimal overhead through atomic synchronization (no async runtime in hot path)
-///
-/// # Tokio Usage
-///
-/// - **screen-capture feature**: Requires tokio runtime for async API surface
-/// - **wayland-pipe feature**: No tokio dependency (uses built-in async operations)
-/// - **Core operations**: Remain synchronous for optimal real-time performance
+/// Result from the platform-specific capture implementation.
 ///
 /// # Errors
 ///
-/// Returns an error if:
-/// - Platform is not supported
-/// - Required dependencies are missing (FFmpeg, GStreamer, etc.)
-/// - Capture permissions are denied
-/// - Output file cannot be created
+/// Returns an error if the target platform is not supported or if the
+/// platform-specific implementation fails.
 ///
-/// # Examples
+/// # Performance Characteristics
 ///
-/// Basic full-screen capture:
-/// ```rust,no_run
-/// use hybrid_screen_capture::{CaptureOptions, capture_screen};
+/// **Time complexity**: O(1) - Simple compile-time platform detection and delegation.
 ///
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let options = CaptureOptions {
-///     output: "capture.mp4".to_string(),
-///     fps: 30,
-///     seconds: 10,
-///     crf: 23,
-///     window: false,
-/// };
-///
-/// capture_screen(options).await?;
-/// # Ok(())
-/// # }
-/// ```
-///
-/// High-quality window capture:
-/// ```rust,no_run
-/// # use hybrid_screen_capture::{CaptureOptions, capture_screen};
-/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-/// let options = CaptureOptions {
-///     output: "window_capture.mp4".to_string(),
-///     fps: 60,
-///     seconds: 5,
-///     crf: 18,  // High quality
-///     window: true,  // Window capture
-/// };
-///
-/// capture_screen(options).await?;
-/// # Ok(())
-/// # }
-/// ```
-pub async fn capture_screen(options: CaptureOptions) -> Result<()> {
-    // WASM builds cannot capture screens - this is a configurator only
-    #[cfg(target_arch = "wasm32")]
-    {
-        return Err(anyhow!(
-            "Screen capture is not available in web browsers. Use the generated CLI command instead."
-        ));
-    }
-
-    println!("Output: {}", options.output);
-    println!(
-        "FPS: {}, Duration: {}s, CRF: {}",
-        options.fps, options.seconds, options.crf
-    );
-
-    dispatch_to_platform(options).await
-}
-
-/// Dispatch capture to the appropriate platform-specific implementation
+/// **Missing functionality**: None - handles all supported platforms with appropriate
+/// error messages for unsupported ones.
 async fn dispatch_to_platform(options: CaptureOptions) -> Result<()> {
     #[cfg(target_os = "linux")]
     return dispatch_linux(options).await;
@@ -267,6 +170,36 @@ async fn dispatch_to_platform(options: CaptureOptions) -> Result<()> {
     Err(anyhow!("Unsupported OS"))
 }
 
+/// Dispatch Linux capture based on session type (Wayland vs X11).
+///
+/// Linux systems can run either X11 or Wayland sessions, each requiring
+/// different capture approaches. This function detects the session type
+/// and routes to the appropriate backend.
+///
+/// The detection logic:
+/// 1. Checks XDG_SESSION_TYPE environment variable
+/// 2. Routes to Wayland if "wayland" (case-insensitive)
+/// 3. Falls back to X11 for all other values
+///
+/// # Parameters
+///
+/// * `options` - Capture configuration to pass to the Linux backend.
+///
+/// # Returns
+///
+/// Result from the Linux-specific capture implementation.
+///
+/// # Errors
+///
+/// Returns an error if neither Wayland nor X11 backends are available
+/// or if the selected backend fails.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Environment variable check and delegation.
+///
+/// **Missing functionality**: None - properly detects Wayland vs X11 and routes
+/// to appropriate backend with fallback options.
 #[cfg(target_os = "linux")]
 async fn dispatch_linux(options: CaptureOptions) -> Result<()> {
     if is_wayland_session() {
@@ -276,6 +209,35 @@ async fn dispatch_linux(options: CaptureOptions) -> Result<()> {
     }
 }
 
+/// Dispatch to Wayland capture implementation.
+///
+/// Wayland requires special handling due to its security model. This function
+/// attempts to use the native Wayland implementation if available, with
+/// fallback logic for when the required features are not enabled.
+///
+/// The priority order:
+/// 1. Use `wayland-pipe` feature (Portal + PipeWire + GStreamer) - preferred
+/// 2. Fall back to `screen-capture` feature (scrap + FFmpeg) - may not work
+/// 3. Return error if neither feature is available
+///
+/// # Parameters
+///
+/// * `options` - Capture configuration to pass to the Wayland backend.
+///
+/// # Returns
+///
+/// Result from the Wayland capture implementation.
+///
+/// # Errors
+///
+/// Returns an error if no suitable Wayland capture backend is available.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Feature-gated delegation with fallback logic.
+///
+/// **Missing functionality**: Could add more sophisticated fallback detection,
+/// but current implementation provides clear error messages and fallbacks.
 #[cfg(target_os = "linux")]
 async fn dispatch_wayland(options: CaptureOptions) -> Result<()> {
     #[cfg(feature = "wayland-pipe")]
@@ -299,6 +261,35 @@ Note: This requires GStreamer + dev headers (see README). Falling back to scrap 
     }
 }
 
+/// Dispatch to X11 capture implementation.
+///
+/// X11 sessions use the traditional Linux desktop environment. This function
+/// delegates to the scrap-based capture implementation, which works reliably
+/// on X11 systems.
+///
+/// The implementation uses:
+/// - scrap library for screen capture
+/// - FFmpeg for video encoding
+/// - Standard X11 APIs for display access
+///
+/// # Parameters
+///
+/// * `options` - Capture configuration to pass to the X11 backend.
+///
+/// # Returns
+///
+/// Result from the X11 capture implementation.
+///
+/// # Errors
+///
+/// Returns an error if the screen-capture feature is not enabled or if
+/// the capture operation fails.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple delegation to scrap-based capture.
+///
+/// **Missing functionality**: None - uses established scrap + FFmpeg backend for X11.
 #[cfg(target_os = "linux")]
 async fn dispatch_x11(options: CaptureOptions) -> Result<()> {
     println!("Detected X11 session → using scrap + FFmpeg …");
@@ -310,6 +301,35 @@ async fn dispatch_x11(options: CaptureOptions) -> Result<()> {
     ));
 }
 
+/// Dispatch to Windows/macOS capture implementation.
+///
+/// Desktop platforms (Windows and macOS) use the scrap library for screen
+/// capture with FFmpeg encoding. This provides consistent behavior across
+/// both platforms with a single implementation.
+///
+/// The implementation uses:
+/// - scrap library for cross-platform screen capture
+/// - FFmpeg for video encoding and file output
+/// - Platform-specific APIs for display access
+///
+/// # Parameters
+///
+/// * `options` - Capture configuration to pass to the desktop backend.
+///
+/// # Returns
+///
+/// Result from the desktop capture implementation.
+///
+/// # Errors
+///
+/// Returns an error if the screen-capture feature is not enabled or if
+/// the capture operation fails.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple delegation to scrap-based capture.
+///
+/// **Missing functionality**: None - uses established scrap + FFmpeg backend for desktop platforms.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 async fn dispatch_desktop(options: CaptureOptions) -> Result<()> {
     println!("Using scrap + FFmpeg …");
@@ -321,10 +341,127 @@ async fn dispatch_desktop(options: CaptureOptions) -> Result<()> {
     ));
 }
 
-/// Returns true if XDG_SESSION_TYPE indicates 'wayland'
+/// Returns true if XDG_SESSION_TYPE indicates 'wayland'.
+///
+/// This function checks the standard Linux environment variable that indicates
+/// the current desktop session type. Wayland sessions require different capture
+/// approaches than X11 sessions due to Wayland's security model.
+///
+/// The check is case-insensitive and returns false if the environment variable
+/// is not set (defaults to assuming X11).
+///
+/// # Returns
+///
+/// `true` if the session type is "wayland", `false` otherwise.
+///
+/// # Examples
+///
+/// ```rust
+/// #[cfg(target_os = "linux")]
+/// {
+///     // On a Wayland system
+///     unsafe { std::env::set_var("XDG_SESSION_TYPE", "wayland"); }
+///     assert!(hybrid_screen_capture::is_wayland_session());
+///
+///     // On an X11 system
+///     unsafe { std::env::set_var("XDG_SESSION_TYPE", "x11"); }
+///     assert!(!hybrid_screen_capture::is_wayland_session());
+/// }
+/// ```
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple environment variable lookup and string comparison.
+///
+/// **Missing functionality**: Could check additional indicators like WAYLAND_DISPLAY,
+/// but XDG_SESSION_TYPE is the standard way to detect session type.
 #[cfg(target_os = "linux")]
-fn is_wayland_session() -> bool {
+pub fn is_wayland_session() -> bool {
     std::env::var("XDG_SESSION_TYPE")
         .map(|v| v.eq_ignore_ascii_case("wayland"))
         .unwrap_or(false)
+}
+
+/// Main entry point for screen capture operations.
+///
+/// This is the primary API function that initiates screen capture with the specified
+/// options. It handles platform detection, feature validation, and delegates to
+/// the appropriate capture backend based on the target platform and available features.
+///
+/// The function performs several key operations:
+/// 1. Validates the target platform (rejects WASM builds)
+/// 2. Logs capture parameters for user feedback
+/// 3. Dispatches to platform-specific capture implementation
+/// 4. Returns success or detailed error information
+///
+/// # Parameters
+///
+/// * `options` - Configuration specifying output path, quality settings, duration, etc.
+///
+/// # Returns
+///
+/// `Ok(())` if capture completes successfully, or an error describing what failed.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Running in unsupported environment (WASM)
+/// - Platform-specific capture backend fails
+/// - Required features are not enabled
+/// - Output path is invalid or inaccessible
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use hybrid_screen_capture::{CaptureOptions, capture_screen};
+///
+/// #[tokio::main]
+/// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+///     let options = CaptureOptions {
+///         output: "recording.mp4".to_string(),
+///         fps: 30,
+///         seconds: 60,
+///         crf: 23,
+///         window: false,
+///         scale_preset: None,
+///         gundam_mode: false,
+///     };
+///
+///     capture_screen(options).await?;
+///     println!("Screen capture completed successfully!");
+///     Ok(())
+/// }
+/// ```
+///
+/// # Platform Support
+///
+/// - **Windows/macOS**: Uses scrap library with FFmpeg encoding
+/// - **Linux X11**: Uses scrap library with FFmpeg encoding
+/// - **Linux Wayland**: Uses XDG Portal + PipeWire + GStreamer (requires `wayland-pipe` feature)
+/// - **WASM**: Not supported (returns error)
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) for setup and dispatch, but the actual capture operation
+/// runs for O(seconds * fps) time. The dispatch itself is O(1) - just platform
+/// detection and delegation to appropriate backend.
+///
+/// **Missing functionality**: None - fully implements platform detection and routing
+/// to appropriate capture backends with proper feature gating.
+pub async fn capture_screen(options: CaptureOptions) -> Result<()> {
+    // WASM builds cannot capture screens - this is a configurator only
+    #[cfg(target_arch = "wasm32")]
+    {
+        return Err(anyhow!(
+            "Screen capture is not available in web browsers. Use the generated CLI command instead."
+        ));
+    }
+
+    println!("Output: {}", options.output);
+    println!(
+        "FPS: {}, Duration: {}s, CRF: {}",
+        options.fps, options.seconds, options.crf
+    );
+
+    dispatch_to_platform(options).await
 }

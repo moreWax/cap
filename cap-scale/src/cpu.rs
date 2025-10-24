@@ -122,6 +122,13 @@ pub struct Staging {
 impl Staging {
     /// Create staging buffer with initial capacity.
     /// Capacity should be at least `width * height * 4` for worst-case input.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Vec::with_capacity is constant time.
+    ///
+    /// **Missing functionality**: None - provides complete staging buffer creation.
+    ///
     pub fn with_capacity(cap: usize) -> Self {
         Self {
             buf: Vec::with_capacity(cap),
@@ -130,6 +137,14 @@ impl Staging {
 
     /// Ensure buffer has at least the specified length, resizing if needed.
     /// More efficient than resize() as it maintains capacity.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(n) where n is the number of bytes added during resize.
+    /// Amortized O(1) when buffer already has sufficient capacity.
+    ///
+    /// **Missing functionality**: None - provides complete buffer length management.
+    ///
     pub fn ensure_len(&mut self, len: usize) {
         if self.buf.len() < len {
             self.buf.resize(len, 0);
@@ -137,6 +152,13 @@ impl Staging {
     }
 
     /// Get immutable view of the compacted data.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple slice reference creation.
+    ///
+    /// **Missing functionality**: None - provides complete buffer access.
+    ///
     pub fn as_slice(&self) -> &[u8] {
         &self.buf
     }
@@ -168,6 +190,16 @@ impl Staging {
 /// # Future Optimizations
 /// TODO: Consider processing in tiles for very large images to reduce peak memory usage.
 /// TODO: Add support for different resize algorithms (Lanczos, Mitchell) based on quality needs.
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(src_width × src_height + dst_width × dst_height) - Convolution-based
+/// scaling algorithm processes each input pixel and writes to output canvas. For HD scaling
+/// (1920×1080 → 1280×720), this represents O(2M + 1M) = O(3M) operations per frame.
+///
+/// **Missing functionality**: None - fully implements BGRA scaling with aspect ratio handling
+/// and strided input support.
+///
 pub fn scale_bgra_cpu(
     resizer: &mut Resizer,
     src_bgra: &[u8],

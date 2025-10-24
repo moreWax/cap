@@ -94,6 +94,15 @@ pub struct ScalePlan {
 ///
 /// # Performance
 /// O(1) computation with minimal floating-point operations
+///
+/// # Performance Characteristics
+///
+/// **Time complexity**: O(1) - Simple arithmetic and conditional logic with minimal
+/// floating-point operations for aspect ratio calculations.
+///
+/// **Missing functionality**: None - provides complete scaling plan computation
+/// for all supported target and aspect combinations.
+///
 pub fn build_plan(input: Size, target: ScaleTarget, aspect: AspectMode) -> ScalePlan {
     match (target, aspect) {
         (ScaleTarget::MaxLongSide(max_side), AspectMode::Preserve) => {
@@ -232,6 +241,13 @@ impl TokenPreset {
     /// Convert preset to the corresponding ScaleTarget for plan computation.
     ///
     /// Most presets use 640px max side, but P6_9 uses 512px for higher compression.
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple enum match with constant-time operations.
+    ///
+    /// **Missing functionality**: None - provides complete preset-to-target conversion.
+    ///
     pub fn to_target(self) -> ScaleTarget {
         match self {
             TokenPreset::P6_9_Long512 => ScaleTarget::MaxLongSide(512),

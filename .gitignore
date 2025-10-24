@@ -23,3 +23,6 @@ docs/dev-log/
 
 # Debug files
 *.pdb
+
+# Test files (temporary - remove when ready for commit)
+tests/integration/session/test_capture_session_execution.rs

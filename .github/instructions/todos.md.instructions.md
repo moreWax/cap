@@ -1,18 +1,22 @@
-# Screen Capture Library Development Todos
+---
+applyTo: '*.*'
+description: "todo list follow them one at a time and mark them as complete when you are completed able to pass your tests with flying colors and the code is working as expected"
+---
+
 
 ## Phase 1: Core Infrastructure (Foundation)
 - [x] Implement Scaling Processor
   - Implement scaling processor in CaptureSessionBuilder::with_scaling() - currently just returns self without adding any scaling processor to the pipeline
 - [x] Complete File Stream Implementation
   - Complete FileStream implementation in processing.rs - has basic structure but may need full GStreamer pipeline integration and error handling
-- [x] Implement Graceful Shutdown
+- [ ] Implement Graceful Shutdown
   - Implement Graceful Shutdown - Add graceful shutdown mechanism to CaptureSession - implement proper cleanup of streams, pipelines, and resources on shutdown
-- [x] Add Error Handling and Recovery
+- [ ] Add Error Handling and Recovery
   - Add Error Handling and Recovery - Add comprehensive error handling throughout the codebase - many functions have basic error handling but could benefit from more detailed error types and recovery strategies
 
 ## Phase 2: CLI/EGUI Integration (Enable Testing)
-- [x] Add Session-Based Capture Mode to CLI
-  - Add Session-Based Capture Mode to CLI - Add session-based capture mode to CLI - replace direct capture_screen() calls with CaptureSessionBuilder pattern to enable processing pipelines and multiple streams - **COMPLETE: CLI --session flag implemented, session_sources.rs with platform-specific CaptureSource implementations, comprehensive testing with 11 tests all passing, Debug trait issues resolved with custom implementations**
+- [ ] Add Session-Based Capture Mode to CLI
+  - Add Session-Based Capture Mode to CLI - Add session-based capture mode to CLI - replace direct capture_screen() calls with CaptureSessionBuilder pattern to enable processing pipelines and multiple streams
 - [ ] Add Session-Based Capture to EGUI
   - Add Session-Based Capture to EGUI - Add session-based capture to EGUI app - replace direct capture_screen() with CaptureSessionBuilder to enable processing pipelines
 - [ ] Add Scaling Preset Selection to CLI
@@ -25,12 +29,12 @@
   - Add Gundam Mode Toggle to EGUI - Add Gundam mode checkbox to EGUI - add checkbox to enable/disable DeepSeek-OCR tiling mode
 
 ## Phase 3: Core Feature Testing (Validate Foundation)
-- [x] Test Scaling Processor Integration
+- [ ] Test Scaling Processor Integration
   - Test Scaling Processor Integration - Test CaptureSessionBuilder::with_scaling() - verify scaling processor is added to pipeline with TokenPreset::P4_Long640 (chosen for typical VLM input optimization), TokenPreset::P2_56_Long640 (minimum scaling), TokenPreset::P10_24_Long640 (maximum scaling) - verify pipeline contains scaling processor and output size changes correctly
 - [x] Test Gundam Processor Integration
-  - Test Gundam Processor Integration - Test CaptureSessionBuilder::with_gundam() - verify GundamProcessor is added to pipeline, initialize() calculates correct composite dimensions for 1920x1080 input (chosen as common screen resolution), verify process_frame() produces expected tile count and global view - ensures Gundam OCR optimization works - **COMPLETE: 10 tests total (4 unit + 3 pipeline integration + 3 session integration) all passing**
-- [x] Test Capture Session Execution
-  - Test Capture Session Execution - Test CaptureSession::run() - verify session initializes pipeline and multiplexer, processes frames through all configured processors and streams - test with mock capture source to verify end-to-end processing flow - **COMPLETE: 13 comprehensive tests implemented covering session initialization, processing pipelines, multiple streams, error handling, resource management, and configuration validation - all tests passing**
+  - Test Gundam Processor Integration - Test CaptureSessionBuilder::with_gundam() - verify GundamProcessor is added to pipeline, initialize() calculates correct composite dimensions for 1920x1080 input (chosen as common screen resolution), verify process_frame() produces expected tile count and global view - ensures Gundam OCR optimization works
+- [ ] Test Capture Session Execution
+  - Test Capture Session Execution - Test CaptureSession::run() - verify session initializes pipeline and multiplexer, processes frames through all configured processors and streams - test with mock capture source to verify end-to-end processing flow
 
 ## Phase 4: Enhanced Features (Build Upon Working Foundation)
 - [ ] Add Performance Monitoring
@@ -118,81 +122,6 @@
 - [ ] Implement Web Management Interface
   - Implement Web Management Interface - Add web-based management interface for monitoring and controlling capture sessions
 - [ ] Add Cloud Storage Support
-  - Add Cloud Storage Support - Add support for recording to cloud storage services (AWS S3, Azure Blob, etc.)
-
-## Generic Testing Harness Instructions (MANDATORY: READ BEFORE ALL TODOS)
-
-**MANDATORY: Read this entire section every time before proceeding to any todo task. This applies to ALL development steps.**
-
-### Testing Process for All Development Steps
-
-1. **Implementation Phase**: Build out the change described in the todo item completely. Ensure the implementation addresses all requirements in the todo description.
-
-2. **Testing Preparation**: When implementation feels complete, create a dedicated test file for verification. The test file should be placed in the appropriate test directory (`tests/unit/`, `tests/integration/`, or `tests/e2e/`) based on the scope of testing.
-
-3. **Test Planning**: At the top of the test file, write a multiline comment with 3-5 paragraphs explaining:
-   - What specific functionality needs to be verified for this todo item
-   - Why these verifications prove the implementation is correct and complete
-   - Edge cases, boundary conditions, and failure modes that must be considered
-   - Clear success criteria that define when the implementation is working correctly
-   - How the tests will validate that the todo requirements are fully met
-
-4. **Test Design Review**: For each planned test, critically evaluate:
-   - Is the testing mechanism sound and appropriate for the functionality?
-   - Does it test the correct parameters and behaviors specified in the todo?
-   - Will the test results provide unambiguous information about correctness?
-   - Are there alternative testing approaches that would be more effective?
-
-5. **Test Implementation**: Write at least 10 comprehensive tests per task that cover:
-   - Normal operation scenarios as described in the todo
-   - Edge cases and boundary conditions specific to the feature
-   - Error handling and failure modes mentioned in the todo
-   - Integration with existing components and APIs
-   - Performance and resource usage validation (where applicable)
-   - Configuration and parameter validation
-   - Cross-platform compatibility (if relevant)
-
-6. **Test Execution**: Run all tests and ensure they pass without failures or filtering. If any tests fail or are filtered out, this indicates the implementation needs redesign or additional work. Continue iterating on the implementation until all tests pass successfully.
-
-7. **Validation**: Only mark the todo as complete when all tests pass successfully and the implementation fully satisfies the todo requirements.
-
-### Testing Harness Usage
-
-Use Cargo's built-in test framework with appropriate feature flags for the component being tested:
-
-```bash
-# Run all tests for a specific component
-cargo test --features [required-features] -- [component-name] --nocapture
-
-# Run specific test file
-cargo test --test [test-type] --features [required-features] -- [test-name] --nocapture
-
-# Run with verbose output to show test execution details
-cargo test --features [required-features] -- [component-name] --nocapture -- --nocapture
-
-# List all available tests
-cargo test --features [required-features] -- --list
-```
-
-**Critical**: If tests fail or are filtered out, this indicates fundamental issues with the implementation design. Do not proceed until all tests pass. Filtered tests mean the test conditions aren't met (e.g., missing features), which requires implementation changes.
-
-### Feature Flags Reference
-
-Common feature flags used in testing:
-- `rtsp-streaming`: Required for session-level components, RTSP streams, Gundam processor
-- `screen-capture`: Required for screen capture functionality
-- `wayland-pipe`: Required for Wayland-specific capture features
-
-### Test Organization
-
-- **Unit Tests** (`tests/unit/`): Test individual components in isolation
-- **Integration Tests** (`tests/integration/`): Test component interactions and APIs
-- **End-to-End Tests** (`tests/e2e/`): Test complete workflows and user-facing functionality
-
-### Success Criteria
-
-A todo is only complete when:
-- All tests pass (no failures)
-- No tests are filtered out (all required features/components are available)
-- The implementation fully addresses the todo description
-- Tests cover all aspects mentioned in the todo requirements
+  - Add Cloud Storage Support - Add support for recording to cloud storage services (AWS S3, Azure Blob, etc.)'
+---
+Provide project context and coding guidelines that AI should follow when generating code, answering questions, or reviewing changes.

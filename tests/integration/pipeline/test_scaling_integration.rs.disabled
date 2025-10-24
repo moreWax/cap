@@ -1,0 +1,176 @@
+//! Integration tests for scaling processor in CaptureSession
+//!
+//! Tests verify that scaling processors integrate correctly with the session
+//! builder pattern and produce expected results in end-to-end scenarios.
+
+use hybrid_screen_capture::session::{CaptureSession, CaptureSessionBuilder};
+use hybrid_screen_capture::core::Size;
+use cap_scale::presets::TokenPreset;
+
+/// Test scaling processor integration with session builder
+#[cfg(test)]
+mod test_scaling_integration {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_session_builder_with_scaling() {
+        // Build session with scaling processor
+        let session_result = CaptureSession::builder()
+            .with_scaling(TokenPreset::P4_Long640)
+            .with_capture_source(MockCaptureSource {
+                size: Size { w: 1920, h: 1080 },
+            })
+            .build();
+
+        assert!(session_result.is_ok(), "Session build should succeed with scaling processor");
+        let session = session_result.unwrap();
+
+        // Verify pipeline has scaling processor
+        assert_eq!(session.pipeline.processors.len(), 1, "Should have one processor");
+
+        // Initialize pipeline
+        let input_size = Size { w: 1920, h: 1080 };
+        let output_size = session.pipeline.initialize(input_size).await.unwrap();
+
+        // Verify scaling output dimensions
+        assert_eq!(output_size.w, 640, "Width should be scaled to 640px");
+        assert_eq!(output_size.h, 360, "Height should be scaled to 360px (preserving 16:9 aspect ratio)");
+    }
+
+    #[tokio::test]
+    async fn test_multiple_processors_with_scaling() {
+        // Build session with Gundam + scaling processors
+        let session_result = CaptureSession::builder()
+            .with_gundam()
+            .with_scaling(TokenPreset::P4_Long640)
+            .with_capture_source(MockCaptureSource {
+                size: Size { w: 1920, h: 1080 },
+            })
+            .build();
+
+        assert!(session_result.is_ok(), "Session build should succeed with multiple processors");
+        let session = session_result.unwrap();
+
+        // Verify pipeline has both processors
+        assert_eq!(session.pipeline.processors.len(), 2, "Should have two processors");
+
+        // Initialize pipeline
+        let input_size = Size { w: 1920, h: 1080 };
+        let output_size = session.pipeline.initialize(input_size).await.unwrap();
+
+        // Final output should be scaled dimensions (scaling is last processor)
+        assert_eq!(output_size.w, 640, "Final width should be scaled to 640px");
+        assert_eq!(output_size.h, 360, "Final height should be scaled to 360px");
+    }
+
+    #[tokio::test]
+    async fn test_scaling_presets_integration() {
+        let presets = vec![
+            (TokenPreset::P2_56_Long640, 640, 480), // 1024x768 -> 640x480
+            (TokenPreset::P4_Long640, 640, 360),     // 1920x1080 -> 640x360
+            (TokenPreset::P6_9_Long512, 512, 287),   // 1344x756 -> 512x287
+            (TokenPreset::P9_Long640, 640, 360),     // 1920x1080 -> 640x360
+            (TokenPreset::P10_24_Long640, 640, 360), // 1920x1080 -> 640x360
+        ];
+
+        for (preset, expected_width, expected_height) in presets {
+            let session_result = CaptureSession::builder()
+                .with_scaling(preset)
+                .with_capture_source(MockCaptureSource {
+                    size: Size { w: 1920, h: 1080 },
+                })
+                .build();
+
+            assert!(session_result.is_ok(), "Session build should succeed for preset {:?}", preset);
+            let session = session_result.unwrap();
+
+            // Initialize and check output size
+            let input_size = Size { w: 1920, h: 1080 };
+            let output_size = session.pipeline.initialize(input_size).await.unwrap();
+
+            assert_eq!(
+                output_size.w, expected_width,
+                "Width mismatch for preset {:?}: expected {}, got {}",
+                preset, expected_width, output_size.w
+            );
+            assert_eq!(
+                output_size.h, expected_height,
+                "Height mismatch for preset {:?}: expected {}, got {}",
+                preset, expected_height, output_size.h
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scaling_with_different_input_sizes() {
+        let test_cases = vec![
+            // (input_width, input_height, expected_output_width, expected_output_height)
+            (1920, 1080, 640, 360),   // FHD 16:9
+            (2560, 1440, 640, 360),   // QHD 16:9
+            (3840, 2160, 640, 360),   // 4K 16:9
+            (1280, 720, 640, 360),    // HD 16:9
+            (1024, 768, 640, 480),    // XGA 4:3
+            (1680, 1050, 640, 400),   // WSXGA+ 16:10
+        ];
+
+        for (input_w, input_h, expected_w, expected_h) in test_cases {
+            let session_result = CaptureSession::builder()
+                .with_scaling(TokenPreset::P4_Long640)
+                .with_capture_source(MockCaptureSource {
+                    size: Size { w: input_w, h: input_h },
+                })
+                .build();
+
+            assert!(session_result.is_ok(), "Session build should succeed for {}x{}", input_w, input_h);
+            let session = session_result.unwrap();
+
+            let input_size = Size { w: input_w, h: input_h };
+            let output_size = session.pipeline.initialize(input_size).await.unwrap();
+
+            assert_eq!(
+                output_size.w, expected_w,
+                "Width mismatch for {}x{}: expected {}, got {}",
+                input_w, input_h, expected_w, output_size.w
+            );
+            assert_eq!(
+                output_size.h, expected_h,
+                "Height mismatch for {}x{}: expected {}, got {}",
+                input_w, input_h, expected_h, output_size.h
+            );
+        }
+    }
+}
+
+// Mock capture source for testing
+struct MockCaptureSource {
+    size: Size,
+}
+
+#[async_trait::async_trait]
+impl cap::session::CaptureSource for MockCaptureSource {
+    async fn capture_frame(&mut self) -> anyhow::Result<cap_rtsp::BgraFrame> {
+        // Create a simple test frame
+        let pixel_count = (self.size.w * self.size.h) as usize;
+        let data = vec![128u8; pixel_count * 4]; // Gray pixels
+
+        Ok(cap_rtsp::BgraFrame {
+            data: std::sync::Arc::new(data),
+            width: self.size.w,
+            height: self.size.h,
+            stride: (self.size.w * 4) as usize,
+            pts_ns: Some(0),
+        })
+    }
+
+    fn input_size(&self) -> Size {
+        self.size
+    }
+
+    async fn initialize(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
