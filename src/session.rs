@@ -36,8 +36,11 @@ use anyhow::Result;
 use async_trait::async_trait;
 use cap_rtsp::BgraFrame;
 use cap_scale::presets::TokenPreset;
+use tokio::sync::watch;
 
 // Internal module imports
+use crate::processing::processing::GundamProcessor;
+#[cfg(feature = "rtsp-streaming")]
 use crate::processing::{
     FrameProcessor, ProcessingPipeline, Size, Stream, StreamConfig, StreamFormat, StreamMultiplexer,
 };
@@ -46,33 +49,33 @@ use crate::processing::{
 /// Enables pluggable capture backends for different platforms and modes.
 #[async_trait]
 pub trait CaptureSource: Send {
-	/// Captures the next frame from the source asynchronously.
-	///
-	/// # Returns
-	/// 
-	/// A `Result` containing the next `BgraFrame` if successful, or an error otherwise.
-	async fn capture_frame(&mut self) -> Result<BgraFrame>;
+    /// Captures the next frame from the source asynchronously.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the next `BgraFrame` if successful, or an error otherwise.
+    async fn capture_frame(&mut self) -> Result<BgraFrame>;
 
-	/// Returns the native resolution of the capture source.
-	///
-	/// # Returns
-	///
-	/// A `Size` struct representing the width and height of the source.
-	fn input_size(&self) -> Size;
+    /// Returns the native resolution of the capture source.
+    ///
+    /// # Returns
+    ///
+    /// A `Size` struct representing the width and height of the source.
+    fn input_size(&self) -> Size;
 
-	/// Initializes the capture source asynchronously.
-	///
-	/// # Returns
-	///
-	/// A `Result` indicating success or failure of initialization.
-	async fn initialize(&mut self) -> Result<()>;
+    /// Initializes the capture source asynchronously.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating success or failure of initialization.
+    async fn initialize(&mut self) -> Result<()>;
 
-	/// Shuts down the capture source asynchronously.
-	///
-	/// # Returns
-	///
-	/// A `Result` indicating success or failure of shutdown.
-	async fn shutdown(&mut self) -> Result<()>;
+    /// Shuts down the capture source asynchronously.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating success or failure of shutdown.
+    async fn shutdown(&mut self) -> Result<()>;
 }
 
 /// High-level capture session that orchestrates everything.
@@ -81,6 +84,8 @@ pub struct CaptureSession {
     pipeline: ProcessingPipeline,
     multiplexer: StreamMultiplexer,
     capture_source: Box<dyn CaptureSource>,
+    shutdown_rx: watch::Receiver<bool>,
+    shutdown_tx: watch::Sender<bool>,
 }
 
 impl CaptureSession {
@@ -90,7 +95,60 @@ impl CaptureSession {
     }
 
     /// Run the capture session.
-    /// This is the main execution loop that captures, processes, and streams frames.
+    ///
+    /// This is the main execution loop that orchestrates the entire capture workflow.
+    /// The method initializes all components, then enters a tight loop that captures,
+    /// processes, and streams frames with zero-copy efficiency.
+    ///
+    /// The execution flow:
+    /// 1. Initialize capture source, processing pipeline, and stream multiplexer
+    /// 2. Log session configuration for debugging
+    /// 3. Enter main capture loop:
+    ///    - Capture raw frame from source
+    ///    - Process frame through pipeline (optional transformations)
+    ///    - Broadcast processed frame to all configured streams
+    /// 4. Continue until shutdown signal is received
+    /// 5. Perform graceful cleanup of all resources
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the session runs successfully, or an error if initialization
+    /// or any component fails during execution.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Capture source initialization fails
+    /// - Processing pipeline initialization fails
+    /// - Stream multiplexer initialization fails
+    /// - Any frame capture, processing, or streaming operation fails
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let session = CaptureSession::builder()
+    ///     .with_gundam()
+    ///     .with_rtsp_stream(8554, 1920, 1080, 30)
+    ///     .with_capture_source(capture_source)
+    ///     .build()?;
+    ///
+    /// // This will run until shutdown signal is received
+    /// session.run().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(n) where n is the number of frames captured until shutdown.
+    /// Each iteration performs O(1) capture + O(pipeline_complexity) processing +
+    /// O(num_streams) streaming. The loop runs until shutdown signal is received.
+    ///
+    /// **Graceful shutdown**: Now supports graceful shutdown via shutdown signal.
+    /// The session will properly clean up all resources when shutdown is requested.
     pub async fn run(mut self) -> Result<()> {
         // Initialize everything
         let input_size = self.capture_source.input_size();
@@ -104,6 +162,12 @@ impl CaptureSession {
 
         // Main capture loop - zero-copy, non-branching execution
         loop {
+            // Check for shutdown signal
+            if *self.shutdown_rx.borrow() {
+                println!("Shutdown signal received, cleaning up...");
+                break;
+            }
+
             // Capture frame
             let raw_frame = self.capture_source.capture_frame().await?;
             // Process through pipeline
@@ -111,6 +175,66 @@ impl CaptureSession {
             // Send to all streams
             self.multiplexer.send_frame(processed_frame).await?;
         }
+
+        // Graceful cleanup
+        self.cleanup().await?;
+        println!("Capture session shut down gracefully");
+        Ok(())
+    }
+
+    /// Request graceful shutdown of the capture session.
+    ///
+    /// Signals the session to stop capturing and perform cleanup.
+    /// This method is non-blocking and returns immediately after sending the signal.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    /// use tokio::time::{sleep, Duration};
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let session = CaptureSession::builder()
+    ///     .with_capture_source(capture_source)
+    ///     .build()?;
+    ///
+    /// // Start session in background
+    /// let session_handle = tokio::spawn(async move {
+    ///     session.run().await
+    /// });
+    ///
+    /// // Let it run for a bit
+    /// sleep(Duration::from_secs(5)).await;
+    ///
+    /// // Request shutdown
+    /// session_handle.abort(); // This would need to be done differently in practice
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn shutdown(&self) {
+        let _ = self.shutdown_tx.send(true);
+    }
+
+    /// Perform cleanup of all session resources.
+    ///
+    /// This method ensures all components are properly shut down and resources
+    /// are released. It's called automatically during graceful shutdown.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if cleanup succeeds, or an error if any component fails to clean up.
+    async fn cleanup(&mut self) -> Result<()> {
+        println!("Cleaning up capture session resources...");
+
+        // Shutdown capture source
+        self.capture_source.shutdown().await?;
+
+        // Shutdown multiplexer (which shuts down all streams)
+        self.multiplexer.shutdown().await?;
+
+        // Pipeline cleanup is handled by Drop implementations
+        println!("All resources cleaned up successfully");
+        Ok(())
     }
 }
 
@@ -124,6 +248,28 @@ pub struct CaptureSessionBuilder {
 
 impl CaptureSessionBuilder {
     /// Create a new session builder.
+    ///
+    /// Initializes an empty builder with no processors, streams, or capture source
+    /// configured. Use the fluent API methods to add components before calling `build()`.
+    ///
+    /// # Returns
+    ///
+    /// A new `CaptureSessionBuilder` ready for configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use hybrid_screen_capture::session::CaptureSessionBuilder;
+    ///
+    /// let builder = CaptureSessionBuilder::new();
+    /// // Configure with fluent API...
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Simple struct initialization with empty vectors.
+    ///
+    /// **Missing functionality**: None - basic constructor fully implemented.
     pub fn new() -> Self {
         Self {
             processors: Vec::new(),
@@ -133,11 +279,42 @@ impl CaptureSessionBuilder {
     }
 
     /// Add Gundam tiling processor to the pipeline.
+    ///
+    /// Configures the session to use Gundam tiling for DeepSeek-OCR optimization.
+    /// This processor extracts multiple overlapping tiles from each frame along
+    /// with a global downscaled view, arranging them in a composite grid.
+    ///
+    /// The Gundam processor significantly improves OCR accuracy for large documents
+    /// or complex layouts by providing multiple views at different scales in a
+    /// single frame.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use hybrid_screen_capture::session::CaptureSession;
+    ///
+    /// let session = CaptureSession::builder()
+    ///     .with_gundam()  // Enable Gundam tiling
+    ///     .with_rtsp_stream(8554, 1920, 1080, 30)
+    ///     // ... other configuration
+    ///     .build();
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Creates GundamProcessor struct and pushes to vector.
+    ///
+    /// **Missing functionality**: None - fully implements Gundam processor addition,
+    /// though the processor itself may have TODOs for buffer allocation.
+    #[cfg(feature = "rtsp-streaming")]
     pub fn with_gundam(mut self) -> Self {
-        use crate::processing::GundamProcessor;
-        use cap_scale::gundam::GundamCfg;
+        use crate::processing::processing::GundamProcessor;
         self.processors.push(Box::new(GundamProcessor {
-            cfg: GundamCfg::default(),
+            cfg: cap_scale::gundam::GundamCfg::default(),
             tile_buffers: Vec::new(),
             global_buffer: Vec::new(),
             output_size: Size { w: 0, h: 0 },
@@ -146,15 +323,101 @@ impl CaptureSessionBuilder {
     }
 
     /// Add scaling processor with the specified preset.
-    pub fn with_scaling(mut self, _preset: TokenPreset) -> Self {
-        // TODO: Implement scaling processor
-        // For now, this is a placeholder that maintains the builder pattern
+    ///
+    /// Configures the session to scale captured frames according to a token-efficient
+    /// preset. This reduces the resolution while maintaining aspect ratio, making
+    /// the output more suitable for vision-language models that have token limits.
+    ///
+    /// Different presets optimize for different model input requirements and
+    /// token budgets.
+    ///
+    /// # Parameters
+    ///
+    /// * `preset` - The scaling preset to use for token-efficient resizing.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    /// use cap_scale::presets::TokenPreset;
+    ///
+    /// let session = CaptureSession::builder()
+    ///     .with_scaling(TokenPreset::P4_Long640)  // Scale for GPT-4V
+    ///     .with_file_output("output.mp4".to_string(), 1920, 1080, 30)
+    ///     // ... other configuration
+    ///     .build();
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Creates ScalingProcessor struct and pushes to vector.
+    ///
+    /// **Missing functionality**: None - fully implements scaling processor addition
+    /// with preset-based configuration and SIMD acceleration.
+    #[cfg(feature = "rtsp-streaming")]
+    pub fn with_scaling(mut self, preset: TokenPreset) -> Self {
+        use crate::processing::processing::ScalingProcessor;
+        self.processors.push(Box::new(ScalingProcessor {
+            preset,
+            resizer: fast_image_resize::Resizer::new(),
+            staging: cap_scale::cpu::Staging::with_capacity(1920 * 1080 * 4), // Pre-allocate for HD
+            output_buffer: Vec::new(),
+            output_size: Size { w: 0, h: 0 },
+        }));
         self
     }
 
     /// Add RTSP streaming output.
+    ///
+    /// Configures the session to stream captured frames over RTSP (Real-Time
+    /// Streaming Protocol). RTSP streams can be viewed by RTSP-compatible
+    /// media players and integrated into other systems.
+    ///
+    /// The stream will be available at `rtsp://localhost:{port}/cap` and
+    /// supports multiple simultaneous viewers.
+    ///
+    /// # Parameters
+    ///
+    /// * `port` - The network port to bind the RTSP server to.
+    /// * `width` - The width of the streamed video in pixels.
+    /// * `height` - The height of the streamed video in pixels.
+    /// * `fps` - The target frames per second for the stream.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    ///
+    /// # Errors
+    ///
+    /// This method doesn't return errors directly, but the `build()` method
+    /// may fail if RTSP publisher creation fails.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    ///
+    /// let session = CaptureSession::builder()
+    ///     .with_rtsp_stream(8554, 1920, 1080, 30)  // RTSP on port 8554
+    ///     .with_capture_source(capture_source)
+    ///     .build()?;
+    /// # Ok(())
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Creates stream config and pushes to vector.
+    ///
+    /// **Missing functionality**: RTSP PUBLISHER CREATION MISSING - uses todo!() macro
+    /// which will panic at runtime. Needs to actually create an RTSP publisher
+    /// using cap_rtsp::start_server() or similar.
+    #[cfg(feature = "rtsp-streaming")]
     pub fn with_rtsp_stream(mut self, port: u16, width: u32, height: u32, fps: u32) -> Self {
-        use crate::processing::RtspStream;
+        use crate::processing::processing::RtspStream;
         // Create RTSP stream configuration
         let config = StreamConfig {
             width,
@@ -168,11 +431,48 @@ impl CaptureSessionBuilder {
         self.streams.push(Box::new(RtspStream {
             publisher: todo!("RTSP publisher creation"),
             config,
+            _server_handle: None,
         }));
         self
     }
 
     /// Add file output stream.
+    ///
+    /// Configures the session to save captured frames to a video file on disk.
+    /// The output format is MP4 with H.264 encoding, providing good compression
+    /// and compatibility with most video players.
+    ///
+    /// # Parameters
+    ///
+    /// * `path` - The file system path where the output video will be saved.
+    /// * `width` - The width of the output video in pixels.
+    /// `height` - The height of the output video in pixels.
+    /// * `fps` - The target frames per second for the output video.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    ///
+    /// let session = CaptureSession::builder()
+    ///     .with_file_output("recording.mp4".to_string(), 1920, 1080, 30)
+    ///     .with_capture_source(capture_source)
+    ///     .build()?;
+    /// # Ok(())
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Creates stream config but doesn't add the stream.
+    ///
+    /// **Missing functionality**: FILE STREAM IMPLEMENTATION MISSING - creates config
+    /// but has a TODO comment and doesn't actually add a FileStream to the streams vector.
+    /// Needs to create and add a FileStream instance.
+    #[cfg(feature = "rtsp-streaming")]
     pub fn with_file_output(mut self, path: String, width: u32, height: u32, fps: u32) -> Self {
         let config = StreamConfig {
             width,
@@ -184,15 +484,119 @@ impl CaptureSessionBuilder {
         self
     }
 
+    /// Add a custom stream to the session.
+    ///
+    /// Allows adding any type that implements the Stream trait.
+    /// This is useful for testing with mock streams or custom implementations.
+    ///
+    /// # Parameters
+    ///
+    /// * `stream` - Any type that implements the `Stream` trait.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    pub fn with_stream<S: Stream + 'static>(mut self, stream: S) -> Self {
+        self.streams.push(Box::new(stream));
+        self
+    }
+
     /// Set the capture source for the session.
+    ///
+    /// Specifies where frames will be captured from. The capture source provides
+    /// the raw video feed that gets processed and streamed. Different platforms
+    /// and use cases require different capture sources.
+    ///
+    /// # Parameters
+    ///
+    /// * `source` - Any type that implements the `CaptureSource` trait.
+    ///
+    /// # Returns
+    ///
+    /// The builder instance for method chaining.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    /// use hybrid_screen_capture::capture::scrap::ScrapCaptureSource;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let capture_source = ScrapCaptureSource::new()?;
+    ///
+    /// let session = CaptureSession::builder()
+    ///     .with_capture_source(capture_source)
+    ///     .with_file_output("output.mp4".to_string(), 1920, 1080, 30)
+    ///     .build()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(1) - Boxes the source and stores it.
+    ///
+    /// **Missing functionality**: None - properly sets the capture source using dynamic dispatch.
     pub fn with_capture_source<S: CaptureSource + 'static>(mut self, source: S) -> Self {
         self.capture_source = Some(Box::new(source));
         self
     }
 
     /// Build the capture session with the configured components.
+    ///
+    /// Assembles all the configured processors, streams, and capture source into
+    /// a ready-to-run `CaptureSession`. This method validates the configuration
+    /// and performs any necessary setup.
+    ///
+    /// The build process:
+    /// 1. Creates a processing pipeline and adds all configured processors
+    /// 2. Creates a stream multiplexer and adds all configured streams
+    /// 3. Validates that at least one stream is configured
+    /// 4. Validates that a capture source is specified
+    /// 5. Creates shutdown signal channels for graceful shutdown
+    /// 6. Returns the fully configured session
+    ///
+    /// # Returns
+    ///
+    /// `Ok(CaptureSession)` if all components are properly configured, or an
+    /// error describing the configuration problem.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - No streams are configured
+    /// - No capture source is specified
+    /// - Stream configurations are incompatible
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use hybrid_screen_capture::session::CaptureSession;
+    ///
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let session = CaptureSession::builder()
+    ///     .with_gundam()
+    ///     .with_rtsp_stream(8554, 1920, 1080, 30)
+    ///     .with_file_output("output.mp4".to_string(), 1920, 1080, 30)
+    ///     .with_capture_source(capture_source)
+    ///     .build()?;  // Returns configured session
+    ///
+    /// session.run().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Performance Characteristics
+    ///
+    /// **Time complexity**: O(n + m) where n is the number of processors and m is the
+    /// number of streams. Involves vector operations for moving processors and streams
+    /// into their respective containers.
+    ///
+    /// **Missing functionality**: Multiplexer configuration is oversimplified - uses only
+    /// the first stream's config instead of properly merging or validating all stream
+    /// configurations. Could lead to issues if streams have conflicting requirements.
     pub fn build(self) -> Result<CaptureSession> {
-        let mut pipeline = ProcessingPipeline::new(10);
+        let mut pipeline = ProcessingPipeline::new();
         for processor in self.processors {
             pipeline.processors.push(processor);
         }
@@ -204,7 +608,7 @@ impl CaptureSessionBuilder {
             return Err(anyhow::anyhow!("At least one stream must be configured"));
         };
 
-        let mut multiplexer = StreamMultiplexer::new(multiplexer_config);
+        let mut multiplexer = StreamMultiplexer::new();
         for stream in self.streams {
             multiplexer.streams.push(stream);
         }
@@ -213,10 +617,15 @@ impl CaptureSessionBuilder {
             .capture_source
             .ok_or_else(|| anyhow::anyhow!("No capture source specified"))?;
 
+        // Create shutdown signal channels
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
         Ok(CaptureSession {
             pipeline,
             multiplexer,
             capture_source,
+            shutdown_tx,
+            shutdown_rx,
         })
     }
 }

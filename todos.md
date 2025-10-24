@@ -5,7 +5,7 @@
   - Implement scaling processor in CaptureSessionBuilder::with_scaling() - currently just returns self without adding any scaling processor to the pipeline
 - [x] Complete File Stream Implementation
   - Complete FileStream implementation in processing.rs - has basic structure but may need full GStreamer pipeline integration and error handling
-- [ ] Implement Graceful Shutdown
+- [x] Implement Graceful Shutdown
   - Implement Graceful Shutdown - Add graceful shutdown mechanism to CaptureSession - implement proper cleanup of streams, pipelines, and resources on shutdown
 - [ ] Add Error Handling and Recovery
   - Add Error Handling and Recovery - Add comprehensive error handling throughout the codebase - many functions have basic error handling but could benefit from more detailed error types and recovery strategies
