@@ -12,5 +12,10 @@ path = "src/main.rs"
 eframe = "0.27"
 egui = "0.27"
 hybrid_screen_capture = { path = "../../", default-features = false, features = ["screen-capture"] }
+cap-scale = { path = "../../cap-scale" }
 tokio = { version = "1.47", features = ["rt-multi-thread", "macros"] }
 async-channel = "2.3"
+
+[features]
+# Enable session-based CaptureSession (maps to hybrid_screen_capture's rtsp-streaming feature)
+session = ["hybrid_screen_capture/rtsp-streaming"]

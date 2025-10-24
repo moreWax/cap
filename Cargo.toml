@@ -66,3 +66,7 @@ rtsp-streaming = ["cap-rtsp", "x11rb", "gstreamer", "gstreamer-app", "gstreamer-
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # Disable screen capture for WASM targets since browsers can't capture screens
+
+[[test]]
+name = "test_egui_session_integration"
+path = "tests/test_egui_session_integration.rs"

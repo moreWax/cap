@@ -204,10 +204,13 @@ pub enum CaptureError {
         context: ErrorContext,
     },
     /// GStreamer errors
+    /// Note: store textual details to avoid unconditional dependency on the
+    /// `gstreamer` crate. Detailed conversion from `gstreamer` errors is
+    /// provided behind the `gstreamer` feature so consumers may include the
+    /// dependency when desired.
     GStreamer {
         element: Option<String>,
         message: String,
-        source: Option<gstreamer::glib::Error>,
         context: ErrorContext,
     },
     /// External library errors
@@ -346,7 +349,6 @@ impl CaptureError {
         Self::GStreamer {
             element,
             message: message.into(),
-            source: None,
             context: ErrorContext::new(),
         }
     }
@@ -686,10 +688,6 @@ impl StdError for CaptureError {
     fn source(&self) -> Option<&(dyn StdError + 'static)> {
         match self {
             Self::Io { source, .. } => Some(source),
-            Self::GStreamer {
-                source: Some(source),
-                ..
-            } => Some(source),
             Self::External { source, .. } => Some(source.as_ref()),
             Self::Network {
                 source: Some(source),

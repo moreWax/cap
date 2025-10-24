@@ -13,16 +13,24 @@
 ## Phase 2: CLI/EGUI Integration (Enable Testing)
 - [x] Add Session-Based Capture Mode to CLI
   - Add Session-Based Capture Mode to CLI - Add session-based capture mode to CLI - replace direct capture_screen() calls with CaptureSessionBuilder pattern to enable processing pipelines and multiple streams - **COMPLETE: CLI --session flag implemented, session_sources.rs with platform-specific CaptureSource implementations, comprehensive testing with 11 tests all passing, Debug trait issues resolved with custom implementations**
-- [ ] Add Session-Based Capture to EGUI
-  - Add Session-Based Capture to EGUI - Add session-based capture to EGUI app - replace direct capture_screen() with CaptureSessionBuilder to enable processing pipelines
-- [ ] Add Scaling Preset Selection to CLI
-  - Add Scaling Preset Selection to CLI - Add scaling preset selection to CLI - add --scale-preset flag with dropdown for TokenPreset options (P2_56, P4, P6_9, P9, P10_24) to enable VLM input optimization
-- [ ] Add Gundam Mode Toggle to CLI
-  - Add Gundam Mode Toggle to CLI - Add Gundam mode toggle to CLI - add --gundam flag to enable DeepSeek-OCR tiling mode for document analysis
-- [ ] Add Scaling Preset Selection to EGUI
-  - Add Scaling Preset Selection to EGUI - Add scaling preset dropdown to EGUI - add combo box for TokenPreset selection (P2_56, P4, P6_9, P9, P10_24) in the UI
-- [ ] Add Gundam Mode Toggle to EGUI
-  - Add Gundam Mode Toggle to EGUI - Add Gundam mode checkbox to EGUI - add checkbox to enable/disable DeepSeek-OCR tiling mode
+- [x] Add Session-Based Capture to EGUI
+  - Add Session-Based Capture to EGUI - Add session-based capture to EGUI app - replace direct capture_screen() with CaptureSessionBuilder to enable processing pipelines - **COMPLETE: Desktop app now uses CaptureSessionBuilder with platform-specific capture sources, scaling presets, Gundam mode, and RTSP streaming support**
+- [x] Add Scaling Preset Selection to CLI
+  - Add Scaling Preset Selection to CLI - Add scaling preset selection to CLI - add --scale-preset flag with dropdown for TokenPreset options (P2_56, P4, P6_9, P9, P10_24) to enable VLM input optimization - **COMPLETE: CLI --scale-preset flag implemented with all TokenPreset options (p2_56, p4, p6_9, p9, p10_24) and comprehensive help text explaining token reduction factors**
+- [x] Add Gundam Mode Toggle to CLI
+  - Add Gundam Mode Toggle to CLI - Add Gundam mode toggle to CLI - add --gundam flag to enable DeepSeek-OCR tiling mode for document analysis - **COMPLETE: CLI --gundam flag implemented with detailed help text explaining tile generation and composite frame creation for DeepSeek-OCR optimization**
+- [x] Add Scaling Preset Selection to EGUI
+  - Add Scaling Preset Selection to EGUI - Add scaling preset dropdown to EGUI - add combo box for TokenPreset selection (P2_56, P4, P6_9, P9, P10_24) in the UI - **COMPLETE: Desktop app includes scaling preset dropdown with all TokenPreset options**
+- [x] Add Gundam Mode Toggle to EGUI
+  - Add Gundam Mode Toggle to EGUI - Add Gundam mode checkbox to EGUI - add checkbox to enable/disable DeepSeek-OCR tiling mode - **COMPLETE: Desktop app includes Gundam mode toggle checkbox**
+
+### Additional EGUI Features Implemented (Beyond Original Todo)
+- [x] Add RTSP Stream Configuration to EGUI
+  - Add RTSP stream toggle and port configuration to EGUI - add checkbox to enable/disable RTSP streaming with configurable port (1024-65535) - **COMPLETE: Desktop app includes RTSP enable checkbox and port input field**
+- [x] Add Runtime Feature Guard to EGUI
+  - Add runtime feature guard to desktop app - implement 'session' feature flag that enables/disables session-based capture, with graceful fallback to legacy capture_screen() - **COMPLETE: Desktop app compiles both with and without session feature**
+- [x] Add Graceful Shutdown to EGUI
+  - Add graceful shutdown mechanism to EGUI - implement proper session shutdown via shutdown sender, allowing clean termination of capture sessions - **COMPLETE: Desktop app includes graceful shutdown via Stop Recording button**
 
 ## Phase 3: Core Feature Testing (Validate Foundation)
 - [x] Test Scaling Processor Integration
@@ -90,7 +98,47 @@
 - [ ] Test File Stream Operations
   - Test File Stream Operations - Test FileStream::initialize() and send_frame() - test GStreamer pipeline creation with MP4 output, verify frame encoding and file writing, test pipeline state management - ensure file output works correctly
 
-## Phase 6: Advanced Features (Future Enhancements)
+## Phase 6: End-to-End Platform Testing (Real World Validation)
+- [ ] Test Wayland End-to-End Capture
+  - Test Wayland End-to-End Capture - Test complete Wayland capture workflow on real Wayland session - verify XDG Desktop Portal integration, pipewire connection, GStreamer pipeline creation, frame capture, and MP4 output - test with scaling presets and Gundam mode - validate performance and resource usage
+- [ ] Test X11 End-to-End Capture  
+  - Test X11 End-to-End Capture - Test complete X11 capture workflow on real X11 session - verify scrap library integration, FFmpeg subprocess communication, frame encoding, and file output - test window capture mode and full screen capture - validate scaling and Gundam processing
+- [ ] Test macOS End-to-End Capture
+  - Test macOS End-to-End Capture - Test complete macOS capture workflow on real macOS system - verify scrap library CoreGraphics integration, AVFoundation framework usage, permission handling, and MP4 output - test Retina display scaling, window capture, and processing pipeline integration
+- [ ] Test Windows End-to-End Capture
+  - Test Windows End-to-End Capture - Test complete Windows capture workflow on real Windows system - verify scrap library GDI/DirectX integration, DXGI desktop duplication, permission handling, and MP4 output - test multi-monitor setups, window capture, and performance optimization
+- [ ] Test Linux Multi-Session End-to-End
+  - Test Linux Multi-Session End-to-End - Test capture across different Linux desktop environments (GNOME, KDE, XFCE, etc.) - verify compatibility with various compositors (Mutter, KWin, Xfwm) - test both X11 and Wayland modes - validate session detection and backend selection
+- [ ] Test RTSP Streaming End-to-End
+  - Test RTSP Streaming End-to-End - Test complete RTSP streaming workflow with real network conditions - verify server startup, client connection, frame transmission, and stream stability - test with VLC, FFmpeg, and other RTSP clients - validate latency, jitter, and packet loss handling
+- [ ] Test Scaling Presets with Real Content
+  - Test Scaling Presets with Real Content - Test all TokenPreset options with real screen content - verify token reduction claims, OCR accuracy preservation, and visual quality - test with text-heavy documents, code editors, web pages, and multimedia content - validate performance impact
+- [ ] Test Gundam Mode with Real Documents
+  - Test Gundam Mode with Real Documents - Test Gundam tiling mode with real document analysis scenarios - verify tile extraction accuracy, global view quality, and OCR optimization - test with PDFs, spreadsheets, presentations, and web articles - validate DeepSeek-OCR integration benefits
+- [ ] Test Session Architecture Reliability
+  - Test Session Architecture Reliability - Test CaptureSessionBuilder pattern under real-world conditions - verify proper resource cleanup, error recovery, and graceful degradation - test long-running sessions (hours), high frame rates (60+ FPS), and memory pressure scenarios - validate thread safety and concurrent stream handling
+- [ ] Test Cross-Platform Compatibility
+  - Test Cross-Platform Compatibility - Test consistent behavior across all supported platforms - verify feature parity, performance characteristics, and user experience - test configuration file portability and deployment scenarios - validate documentation accuracy and setup procedures
+
+## Phase 7: Performance and Stress Testing (Production Readiness)
+- [ ] Test High-Resolution Capture Performance
+  - Test High-Resolution Capture Performance - Test 4K (3840x2160) and ultrawide (3440x1440) capture scenarios - verify frame rate stability, memory usage, and CPU utilization - test with scaling presets and Gundam mode processing - validate performance under sustained load
+- [ ] Test Multi-Monitor Capture Scenarios
+  - Test Multi-Monitor Capture Scenarios - Test capture across multiple displays with different resolutions and scaling factors - verify proper display detection, coordinate mapping, and frame synchronization - test with mixed DPI settings and display arrangements - validate performance scaling
+- [ ] Test Long-Duration Recording Stability
+  - Test Long-Duration Recording Stability - Test continuous recording sessions (1+ hours) - verify memory leak prevention, file size management, and stream stability - test with automatic file rotation and recovery scenarios - validate resource cleanup and session persistence
+- [ ] Test Concurrent Stream Performance
+  - Test Concurrent Stream Performance - Test simultaneous RTSP streaming and file recording - verify resource sharing, bandwidth allocation, and quality maintenance - test with multiple RTSP clients and different encoding settings - validate load balancing and error isolation
+- [ ] Test Network-Adaptive Streaming
+  - Test Network-Adaptive Streaming - Test RTSP streaming under varying network conditions - verify adaptive bitrate, frame dropping, and reconnection handling - test with bandwidth throttling, packet loss simulation, and network interruptions - validate client experience quality
+- [ ] Test Memory Pressure Handling
+  - Test Memory Pressure Handling - Test capture under low memory conditions - verify graceful degradation, buffer management, and error recovery - test with memory limits, swap usage, and OOM killer scenarios - validate data integrity and crash prevention
+- [ ] Test CPU Load Adaptation
+  - Test CPU Load Adaptation - Test capture under high CPU load from other applications - verify frame rate adaptation, processing pipeline optimization, and priority management - test with background processes, system updates, and resource contention - validate consistent capture quality
+- [ ] Test Power Management Integration
+  - Test Power Management Integration - Test capture during system sleep, hibernation, and power state changes - verify graceful pause/resume, state preservation, and recovery handling - test on laptops with battery optimization and thermal throttling - validate user notification and data protection
+
+## Phase 8: Advanced Features (Future Enhancements)
 - [ ] Add Multiple Stream Support
   - Add Multiple Stream Support - Add support for multiple concurrent RTSP streams with different configurations - currently limited to single stream per server
 - [ ] Add Adaptive Bitrate
@@ -120,79 +168,94 @@
 - [ ] Add Cloud Storage Support
   - Add Cloud Storage Support - Add support for recording to cloud storage services (AWS S3, Azure Blob, etc.)
 
-## Generic Testing Harness Instructions (MANDATORY: READ BEFORE ALL TODOS)
+## Phase 9: Chrome Extension with MCP Server (WebAssembly Integration)
 
-**MANDATORY: Read this entire section every time before proceeding to any todo task. This applies to ALL development steps.**
+### Chrome Extension Architecture Setup
+- [ ] Create Chrome Extension Manifest
+  - Create Chrome Extension Manifest - Set up manifest.json v3 with proper permissions for MCP server communication, WebAssembly execution, and browser extension APIs - configure content scripts, background scripts, and popup interface
+- [ ] Set up WebAssembly Build Pipeline
+  - Set up WebAssembly Build Pipeline - Configure wasm-pack and cargo build targets for WebAssembly compilation - set up development workflow for Rust-to-WASM compilation with proper feature flags and optimization
+- [ ] Initialize Wassette MCP Client Integration
+  - Initialize Wassette MCP Client Integration - Install Wassette using the one-liner script (curl -fsSL https://raw.githubusercontent.com/microsoft/wassette/main/install.sh | bash) - configure Wassette as MCP server for the extension's WebAssembly client - set up secure sandbox environment for WebAssembly components
+- [ ] Create Extension Directory Structure
+  - Create Extension Directory Structure - Set up organized folder structure for popup, background scripts, content scripts, WebAssembly modules, and MCP-UI components - establish clear separation between browser extension code and WebAssembly MCP server
 
-### Testing Process for All Development Steps
+### WebAssembly MCP Server Implementation
+- [ ] Implement Rust WebAssembly MCP Server
+  - Implement Rust WebAssembly MCP Server - Create MCP server in Rust that compiles to WebAssembly - implement MCP protocol handlers for tool registration, execution, and response formatting - ensure compatibility with Wassette's WebAssembly component model
+- [ ] Integrate Rig LLM Client Library
+  - Integrate Rig LLM Client Library - Add Rig library for LLM/VLM/Omni model interactions - implement OpenAI-compatible API client with configurable base URL and API key - add support for thinking/vision capabilities with proper feature toggles
+- [ ] Create WebAssembly Tool Registry
+  - Create WebAssembly Tool Registry - Implement tool registration system for Wassette-loaded WebAssembly components - create secure tool execution environment with proper sandboxing and permission management - implement tool discovery and metadata handling
+- [ ] Implement MCP Protocol Bridge
+  - Implement MCP Protocol Bridge - Build bidirectional communication bridge between browser extension and WebAssembly MCP server - implement message passing for tool calls, responses, and state synchronization - ensure thread-safe communication across JavaScript/WebAssembly boundary
 
-1. **Implementation Phase**: Build out the change described in the todo item completely. Ensure the implementation addresses all requirements in the todo description.
+### MCP-UI Panel Implementation
+- [ ] Design Apple-Inspired UI Framework
+  - Design Apple-Inspired UI Framework - Create crisp, clean design system inspired by Apple's software aesthetics - implement consistent typography, spacing, colors, and interaction patterns - establish design tokens for maintainable and scalable UI components
+- [ ] Build Resizable Panel System
+  - Build Resizable Panel System - Implement window-like panel that supports tiling modes (half-screen left/right, full-screen, small overlay) - add smooth drag-and-drop positioning with magnetic snapping - create responsive layout system that adapts to different panel sizes
+- [ ] Create MCP-UI Integration Layer
+  - Create MCP-UI Integration Layer - Implement MCP-UI components for tool interaction and agent visualization - create real-time execution monitoring and output display - build intuitive interface for tool parameter input and result visualization
+- [ ] Implement Panel State Management
+  - Implement Panel State Management - Create state management system for panel position, size, and configuration persistence - implement settings synchronization across browser sessions - add keyboard shortcuts and accessibility features
 
-2. **Testing Preparation**: When implementation feels complete, create a dedicated test file for verification. The test file should be placed in the appropriate test directory (`tests/unit/`, `tests/integration/`, or `tests/e2e/`) based on the scope of testing.
+### Settings and Configuration System
+- [ ] Build Settings Panel Interface
+  - Build Settings Panel Interface - Create elegant settings interface with dropdowns, toggles, and text inputs - implement tabbed interface for different configuration categories - add real-time validation and user feedback
+- [ ] Implement LLM Configuration UI
+  - Implement LLM Configuration UI - Build configuration interface for OpenAI-compatible API servers - add secure API key storage with browser extension storage APIs - implement connection testing and error handling for LLM endpoints
+- [ ] Create Wassette Component Management
+  - Create Wassette Component Management - Build interface for loading and managing WebAssembly components from OCI registries - implement component discovery, version management, and permission configuration - add visual component library browser
+- [ ] Implement Extension Preferences
+  - Implement Extension Preferences - Create comprehensive preferences system for UI themes, panel behavior, and default settings - implement import/export functionality for configuration backup - add keyboard shortcut customization
 
-3. **Test Planning**: At the top of the test file, write a multiline comment with 3-5 paragraphs explaining:
-   - What specific functionality needs to be verified for this todo item
-   - Why these verifications prove the implementation is correct and complete
-   - Edge cases, boundary conditions, and failure modes that must be considered
-   - Clear success criteria that define when the implementation is working correctly
-   - How the tests will validate that the todo requirements are fully met
+### Terminal Interface for LLM Interaction
+- [ ] Build WebAssembly Terminal Component
+  - Build WebAssembly Terminal Component - Create terminal emulator that runs in WebAssembly environment - implement command history, auto-completion, and syntax highlighting - ensure smooth performance with large output streams
+- [ ] Integrate Rig LLM Client in Terminal
+  - Integrate Rig LLM Client in Terminal - Connect terminal to Rig library for direct LLM interaction - implement streaming responses and conversation history - add support for multi-modal inputs (text, images, audio)
+- [ ] Create Terminal Command System
+  - Create Terminal Command System - Build extensible command system for LLM operations and tool interactions - implement command parsing, validation, and execution pipeline - add help system and command discovery
+- [ ] Implement Terminal UI Polish
+  - Implement Terminal UI Polish - Add smooth animations, responsive design, and accessibility features - implement dark/light theme support with syntax highlighting - create intuitive keyboard navigation and shortcuts
 
-4. **Test Design Review**: For each planned test, critically evaluate:
-   - Is the testing mechanism sound and appropriate for the functionality?
-   - Does it test the correct parameters and behaviors specified in the todo?
-   - Will the test results provide unambiguous information about correctness?
-   - Are there alternative testing approaches that would be more effective?
+### Agent Execution Visualization
+- [ ] Build Agent Execution Timeline
+  - Build Agent Execution Timeline - Create visual timeline showing agent thought process and tool execution - implement step-by-step execution visualization with expandable details - add performance metrics and timing information
+- [ ] Implement Tool Execution Monitoring
+  - Implement Tool Execution Monitoring - Build real-time monitoring of WebAssembly tool execution - display tool inputs, outputs, and execution status - implement error handling and retry mechanisms with visual feedback
+- [ ] Create MCP Output Visualization
+  - Create MCP Output Visualization - Design rich output display for MCP server responses and tool results - implement syntax highlighting for different data formats (JSON, text, images) - add collapsible sections and search functionality
+- [ ] Add Execution History and Replay
+  - Add Execution History and Replay - Implement execution history with searchable and filterable results - create replay functionality for reviewing past agent interactions - add export capabilities for execution logs
 
-5. **Test Implementation**: Write at least 10 comprehensive tests per task that cover:
-   - Normal operation scenarios as described in the todo
-   - Edge cases and boundary conditions specific to the feature
-   - Error handling and failure modes mentioned in the todo
-   - Integration with existing components and APIs
-   - Performance and resource usage validation (where applicable)
-   - Configuration and parameter validation
-   - Cross-platform compatibility (if relevant)
+### Security and Permissions
+- [ ] Implement Wassette Security Policies
+  - Implement Wassette Security Policies - Configure Wassette permission system for secure tool execution - implement sandboxing rules and resource limits for WebAssembly components - create audit logging for security events
+- [ ] Build Secure API Key Storage
+  - Build Secure API Key Storage - Implement secure storage for API keys using browser extension APIs - add encryption and access controls for sensitive configuration - implement key rotation and expiration handling
+- [ ] Create Permission Management UI
+  - Create Permission Management UI - Build interface for managing Wassette component permissions - implement granular permission controls for different tool categories - add permission audit trail and approval workflows
+- [ ] Implement Content Security Policy
+  - Implement Content Security Policy - Configure strict CSP for the extension to prevent XSS attacks - implement secure communication channels between extension components - add runtime security monitoring and violation reporting
 
-6. **Test Execution**: Run all tests and ensure they pass without failures or filtering. If any tests fail or are filtered out, this indicates the implementation needs redesign or additional work. Continue iterating on the implementation until all tests pass successfully.
+### Testing and Quality Assurance
+- [ ] Test WebAssembly MCP Server Functionality
+  - Test WebAssembly MCP Server Functionality - Create comprehensive tests for MCP protocol implementation - test tool registration, execution, and error handling in WebAssembly environment - validate cross-browser compatibility
+- [ ] Validate Chrome Extension APIs
+  - Validate Chrome Extension APIs - Test all Chrome extension APIs used in the implementation - verify permission handling and API availability across Chrome versions - implement fallback mechanisms for API limitations
+- [ ] Test Wassette Integration End-to-End
+  - Test Wassette Integration End-to-End - Test complete WebAssembly component loading and execution pipeline - validate secure sandboxing and permission enforcement - test component lifecycle management and cleanup
+- [ ] Performance Testing and Optimization
+  - Performance Testing and Optimization - Test WebAssembly compilation and execution performance - optimize bundle size and loading times - implement performance monitoring and profiling tools
 
-7. **Validation**: Only mark the todo as complete when all tests pass successfully and the implementation fully satisfies the todo requirements.
-
-### Testing Harness Usage
-
-Use Cargo's built-in test framework with appropriate feature flags for the component being tested:
-
-```bash
-# Run all tests for a specific component
-cargo test --features [required-features] -- [component-name] --nocapture
-
-# Run specific test file
-cargo test --test [test-type] --features [required-features] -- [test-name] --nocapture
-
-# Run with verbose output to show test execution details
-cargo test --features [required-features] -- [component-name] --nocapture -- --nocapture
-
-# List all available tests
-cargo test --features [required-features] -- --list
-```
-
-**Critical**: If tests fail or are filtered out, this indicates fundamental issues with the implementation design. Do not proceed until all tests pass. Filtered tests mean the test conditions aren't met (e.g., missing features), which requires implementation changes.
-
-### Feature Flags Reference
-
-Common feature flags used in testing:
-- `rtsp-streaming`: Required for session-level components, RTSP streams, Gundam processor
-- `screen-capture`: Required for screen capture functionality
-- `wayland-pipe`: Required for Wayland-specific capture features
-
-### Test Organization
-
-- **Unit Tests** (`tests/unit/`): Test individual components in isolation
-- **Integration Tests** (`tests/integration/`): Test component interactions and APIs
-- **End-to-End Tests** (`tests/e2e/`): Test complete workflows and user-facing functionality
-
-### Success Criteria
-
-A todo is only complete when:
-- All tests pass (no failures)
-- No tests are filtered out (all required features/components are available)
-- The implementation fully addresses the todo description
-- Tests cover all aspects mentioned in the todo requirements
+### Deployment and Distribution
+- [ ] Prepare Chrome Web Store Listing
+  - Prepare Chrome Web Store Listing - Create compelling store listing with screenshots and feature descriptions - implement proper categorization and search keywords - prepare privacy policy and terms of service
+- [ ] Set up Extension Update System
+  - Set up Extension Update System - Configure automatic updates through Chrome Web Store - implement version management and migration handling - create update notification system for users
+- [ ] Create Installation and Setup Documentation
+  - Create Installation and Setup Documentation - Write comprehensive setup guide for users - document Wassette installation and configuration - create troubleshooting guide for common issues
+- [ ] Implement Analytics and Usage Tracking
+  - Implement Analytics and Usage Tracking - Add privacy-respecting usage analytics - implement error reporting and crash handling - create feedback collection system for continuous improvement

@@ -237,6 +237,14 @@ impl CaptureSession {
         let _ = self.shutdown_tx.send(true);
     }
 
+    /// Return a clone of the session shutdown sender.
+    ///
+    /// This allows callers (for example GUI code) to keep a handle and trigger
+    /// graceful shutdown without needing ownership of the whole session object.
+    pub fn shutdown_sender(&self) -> watch::Sender<bool> {
+        self.shutdown_tx.clone()
+    }
+
     /// Perform cleanup of all session resources.
     ///
     /// This method ensures all components are properly shut down and resources
